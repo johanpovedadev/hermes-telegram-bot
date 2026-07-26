@@ -1,58 +1,78 @@
 import os
-import subprocess
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
-from bot.core.config import DOCUMENTS_PATH, TIMEOUT_SECONDS, MAX_OUTPUT_LENGTH
+from bot.core.config import DOCUMENTS_PATH, MAX_OUTPUT_LENGTH
 from bot.core.opencode_runner import ejecutar_opencode
+
+LAST_LINES = 15
+
+
+def extraer_ultimas_lineas(texto, n=LAST_LINES):
+    lineas = texto.strip().splitlines()
+    return "\n".join(lineas[-n:])
 
 
 async def ejecutar_issue(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        args = context.args
-        if len(args) < 2:
-            await update.message.reply_text(
-                "⚠️ Uso: `/run [carpeta] [prompt]`",
-                parse_mode="Markdown"
-            )
-            return
-
-        proyecto = args[0]
-        prompt = " ".join(args[1:])
-        target_path = os.path.join(DOCUMENTS_PATH, proyecto)
-
-        if not os.path.exists(target_path):
-            await update.message.reply_text(
-                f"❌ No existe `{proyecto}`.",
-                parse_mode="Markdown"
-            )
-            return
-
+    args = context.args
+    if len(args) < 2:
         await update.message.reply_text(
-            f"⏳ *Ejecutando en `{proyecto}`...*\n📝 _{prompt}_",
+            "Uso: `/run [carpeta] [prompt]`",
             parse_mode="Markdown"
         )
+        return
 
-        result = await ejecutar_opencode(prompt, target_path)
+    proyecto = args[0]
+    prompt = " ".join(args[1:])
+    target_path = os.path.join(DOCUMENTS_PATH, proyecto)
 
-        output = result["stdout"][-1500:] if result["stdout"] else ""
-        errors = result["stderr"][-500:] if result["stderr"] else ""
+    if not os.path.exists(target_path):
+        await update.message.reply_text(
+            f"No existe `{proyecto}`.",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        f"Ejecutando en `{proyecto}`...\n_{prompt}_",
+        parse_mode="Markdown"
+    )
+
+    chat_id = update.effective_chat.id
+
+    async def on_complete(result):
+        if result.get("timeout"):
+            text = f"Timeout ({result['stderr']})"
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=status_msg.message_id, text=text
+            )
+            return
+
+        output = extraer_ultimas_lineas(result["stdout"])
+        errores = extraer_ultimas_lineas(result["stderr"])
 
         if result["returncode"] == 0:
-            msg = f"✅ *Completado:*\n```\n{output}\n```"
+            text = (
+                f"Tarea completada: {proyecto}\n"
+                f"Prompt: {prompt}\n\n"
+                f"Salida:\n```\n{output}\n```"
+            )
         else:
-            msg = f"❌ *Error:*\n```\n{errors}\n```"
+            text = (
+                f"Error en: {proyecto}\n"
+                f"Prompt: {prompt}\n"
+                f"Exit code: {result['returncode']}\n\n"
+                f"Error:\n```\n{errores}\n```"
+            )
 
-        if len(msg) > MAX_OUTPUT_LENGTH:
-            msg = msg[:MAX_OUTPUT_LENGTH] + "\n... (truncado)"
+        if len(text) > MAX_OUTPUT_LENGTH:
+            text = text[:MAX_OUTPUT_LENGTH] + "\n... (truncado)"
 
-        await update.message.reply_text(msg, parse_mode="Markdown")
-
-    except subprocess.TimeoutExpired:
-        await update.message.reply_text(
-            f"⏰ Timeout ({TIMEOUT_SECONDS}s)."
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=status_msg.message_id,
+            text=text, parse_mode="Markdown"
         )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+
+    await ejecutar_opencode(prompt, target_path, on_complete=on_complete)
 
 
 def get_handlers():

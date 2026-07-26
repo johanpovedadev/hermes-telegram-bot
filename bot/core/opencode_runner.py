@@ -1,23 +1,43 @@
 import asyncio
+import os
 import subprocess
 from bot.core.config import TIMEOUT_SECONDS
 
+OPENCODE_CMD = os.path.join(os.environ.get("APPDATA", ""), "npm", "opencode.cmd")
 
-def run_opencode(prompt: str, cwd: str) -> dict:
-    result = subprocess.run(
-        ["opencode", "run", prompt],
+LAST_LINES = 15
+
+
+async def ejecutar_opencode(prompt: str, cwd: str, on_complete=None):
+    proc = await asyncio.create_subprocess_exec(
+        OPENCODE_CMD, "run", prompt,
         cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT_SECONDS
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    return {
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        if on_complete:
+            await on_complete({
+                "returncode": -1,
+                "stdout": "",
+                "stderr": f"Timeout ({TIMEOUT_SECONDS}s)",
+                "timeout": True,
+            })
+        return
+
+    result = {
+        "returncode": proc.returncode,
+        "stdout": stdout.decode(errors="replace"),
+        "stderr": stderr.decode(errors="replace"),
+        "timeout": False,
     }
 
-
-async def ejecutar_opencode(prompt: str, cwd: str) -> dict:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: run_opencode(prompt, cwd))
+    if on_complete:
+        await on_complete(result)
