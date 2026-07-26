@@ -1,4 +1,4 @@
-# Hermes Bot
+# Jarvis León Bot
 
 Bot de Telegram que ejecuta OpenCode CLI de forma remota.
 

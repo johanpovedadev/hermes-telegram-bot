@@ -22,7 +22,7 @@ def main():
     for handler in run_handlers():
         app.add_handler(handler)
 
-    print("🤖 Hermes iniciado. Escuchando comandos...")
+    print("🤖 Jarvis León iniciado. Escuchando comandos...")
     app.run_polling()
 
 

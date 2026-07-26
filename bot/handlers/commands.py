@@ -8,7 +8,7 @@ from bot.core.config import DOCUMENTS_PATH
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚡ *Hermes Activo*\n\n"
+        "⚡ *Jarvis León Activo*\n\n"
         "Comandos:\n"
         "• `/proyectos` - Lista repos en Documentos\n"
         "• `/run [proyecto] [issue]` - Ejecuta OpenCode\n"
