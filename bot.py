@@ -6,6 +6,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bot.core.config import BOT_TOKEN
 from bot.handlers.commands import get_handlers as cmd_handlers
 from bot.handlers.run import get_handlers as run_handlers
+from bot.handlers.callbacks import get_handlers as callback_handlers
+from bot.handlers.chat import get_handlers as chat_handlers
 
 from telegram.ext import ApplicationBuilder
 
@@ -21,8 +23,12 @@ def main():
         app.add_handler(handler)
     for handler in run_handlers():
         app.add_handler(handler)
+    for handler in callback_handlers():
+        app.add_handler(handler)
+    for handler in chat_handlers():
+        app.add_handler(handler)
 
-    print("🤖 Hermes iniciado. Escuchando comandos...")
+    print("⚡ Jarvis León iniciado. Escuchando comandos...")
     app.run_polling()
 
 
