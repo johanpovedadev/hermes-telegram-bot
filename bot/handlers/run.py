@@ -1,10 +1,14 @@
 import os
+import uuid
 import subprocess
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CommandHandler, ContextTypes
 from bot.core.config import DOCUMENTS_PATH, TIMEOUT_SECONDS, MAX_OUTPUT_LENGTH
 from bot.core.opencode_runner import ejecutar_opencode
+from bot.core.notifications import NotificationManager
+from bot.handlers.callbacks import crear_botones_notificacion
 
+nm = NotificationManager()
 
 async def ejecutar_issue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -37,17 +41,26 @@ async def ejecutar_issue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         output = result["stdout"][-1500:] if result["stdout"] else ""
         errors = result["stderr"][-500:] if result["stderr"] else ""
 
+        notif_id = str(uuid.uuid4())[:8]
+
         if result["returncode"] == 0:
-            msg = f"✅ *Completado:*\n```\n{output}\n```"
+            msg = f"✅ *Completado:* `{proyecto}`\n📌 *Proceso:* `{prompt[:50]}...`\n\n```\n{output}\n```"
+            nm.crear_notificacion(notif_id, proyecto, prompt, resultado="success")
         else:
-            msg = f"❌ *Error:*\n```\n{errors}\n```"
+            msg = f"❌ *Error en:* `{proyecto}`\n📌 *Proceso:* `{prompt[:50]}...`\n\n```\n{errors}\n```"
+            nm.crear_notificacion(notif_id, proyecto, prompt, resultado="error")
 
         if len(msg) > MAX_OUTPUT_LENGTH:
             msg = msg[:MAX_OUTPUT_LENGTH] + "\n... (truncado)"
 
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        reply_markup = crear_botones_notificacion(notif_id)
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=reply_markup)
 
     except subprocess.TimeoutExpired:
+        notif_id = str(uuid.uuid4())[:8]
+        nm.crear_notificacion(notif_id, args[0] if args else "unknown",
+                            " ".join(args[1:]) if len(args) > 1 else "",
+                            resultado="timeout")
         await update.message.reply_text(
             f"⏰ Timeout ({TIMEOUT_SECONDS}s)."
         )
