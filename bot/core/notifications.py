@@ -2,8 +2,9 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict, field
+from bot.core.auto_approval import AutoApprovalEngine
 
 NOTIFICATIONS_FILE = os.path.expanduser("~/.jarvis/notifications.json")
 METRICS_FILE = os.path.expanduser("~/.jarvis/metrics.json")
@@ -23,7 +24,7 @@ class Notification:
         return asdict(self)
 
 class NotificationManager:
-    def __init__(self, data_dir: Optional[str] = None):
+    def __init__(self, data_dir: Optional[str] = None, auto_approval_engine: Optional[AutoApprovalEngine] = None):
         if data_dir:
             self.notifications_file = os.path.join(data_dir, "notifications.json")
             self.metrics_file = os.path.join(data_dir, "metrics.json")
@@ -31,6 +32,7 @@ class NotificationManager:
             self.notifications_file = NOTIFICATIONS_FILE
             self.metrics_file = METRICS_FILE
 
+        self.auto_approval_engine = auto_approval_engine or AutoApprovalEngine()
         self._ensure_files()
 
     def _ensure_files(self):
@@ -165,3 +167,15 @@ class NotificationManager:
             "pendientes": len([n for n in notifs if n.estado == "pendiente"]),
             "metricas": self.obtener_metricas(proyecto)
         }
+
+    def debe_auto_aprobar(self, proyecto: str, proceso: str, resultado: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Verificar si un proceso debe auto-aprobarse.
+
+        Returns:
+            (debe_auto_aprobar, razón)
+        """
+        if self.auto_approval_engine.should_auto_approve(proyecto, proceso, resultado):
+            return True, f"Auto-aprobado: {proceso} es proceso seguro"
+
+        return False, f"Requiere aprobación manual: {proceso}"
