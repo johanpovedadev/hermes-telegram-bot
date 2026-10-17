@@ -89,7 +89,7 @@ Antes del primer commit de un proyecto nuevo:
 | lion-platform-api | johanpovedadev/lion-platform-api | API multitenant de Lion Platform (Java/Spring), licencias por producto | 8080 / 8081 |
 | lion-platform-web | johanpovedadev/lion-platform-web | Frontend de Lion Platform (React/Vite) | 5173 |
 | LionCore | johanpovedadev/LionCore | POS SaaS offline-first | — |
-| Jarvis León | maxtortecnoreparaciones/hermes-telegram-bot | Bot de Telegram de Johan (alertas y notificaciones) | — |
-| pythonauto | maxtortecnoreparaciones/pythonauto | Scripts de automatización y scraping de prospectos | — |
-| social-bot | (local, sin remoto) | Bot de webhooks de redes | 8300 |
+| Jarvis León | johanpovedadev/hermes-telegram-bot | Bot de Telegram de Johan (alertas y notificaciones) | — |
+| pythonauto | johanpovedadev/pythonauto | Scripts de automatización y scraping de prospectos | — |
+| social-bot | johanpovedadev/AGentVents (carpeta `social-bot/`) | Bot de comentarios y DMs de Instagram/Facebook | 8300 |
 | ai-opportunity-hunter, todo-api-hono, pilatesapp, Portafolio, Mundo-Helados, maxtortecnoreparaciones, trycore-evm-project | johanpovedadev/… | Proyectos de apoyo, portafolio y pruebas | — |
