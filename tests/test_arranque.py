@@ -17,7 +17,7 @@ def test_bot_py_importa_y_registra_todos_los_comandos(monkeypatch):
     registrados = []
 
     class FakeApp:
-        def add_handler(self, h):
+        def add_handler(self, h, group=0):
             registrados.append(h)
 
         def run_polling(self):
@@ -26,6 +26,7 @@ def test_bot_py_importa_y_registra_todos_los_comandos(monkeypatch):
     builder = MagicMock()
     builder.token.return_value.build.return_value = FakeApp()
     monkeypatch.setattr(mod, "BOT_TOKEN", "123456:TEST-TOKEN-SIN-RED")
+    monkeypatch.setattr(mod, "ALLOWED_CHAT_IDS_RAW", "5534032418")
     monkeypatch.setattr(mod, "ApplicationBuilder", lambda: builder)
     mod.main()
     comandos = {c for h in registrados for c in getattr(h, "commands", [])}

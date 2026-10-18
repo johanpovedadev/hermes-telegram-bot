@@ -7,6 +7,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 BOT_TOKEN = os.environ.get("HERMES_BOT_TOKEN", "")
+# Chats que pueden darle órdenes a Hermes (ids numéricos separados por coma). Vacío = el bot no arranca.
+ALLOWED_CHAT_IDS_RAW = os.environ.get("HERMES_ALLOWED_CHAT_IDS", "")
 DOCUMENTS_PATH = os.path.expanduser(os.environ.get("HERMES_DOCUMENTS_PATH", "~/Documents"))
 TIMEOUT_SECONDS = int(os.environ.get("HERMES_TIMEOUT_SECONDS", "300"))
 MAX_OUTPUT_LENGTH = 4000

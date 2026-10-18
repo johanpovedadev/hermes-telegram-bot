@@ -3,7 +3,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from bot.core.config import BOT_TOKEN
+from bot.core.config import BOT_TOKEN, ALLOWED_CHAT_IDS_RAW
+from bot.core.security import parse_allowed, build_guard_handler, GUARD_GROUP
 from bot.handlers.commands import get_handlers as cmd_handlers
 from bot.handlers.run import get_handlers as run_handlers
 from bot.handlers.callbacks import get_handlers as callback_handlers
@@ -17,7 +18,19 @@ def main():
         print("Configura HERMES_BOT_TOKEN en .env o variable de entorno.")
         sys.exit(1)
 
+    try:
+        allowed = parse_allowed(ALLOWED_CHAT_IDS_RAW)
+    except ValueError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+    if not allowed:
+        # Falla cerrado: sin lista de chats permitidos, cualquiera podría darle órdenes al bot.
+        print("❌ Configura HERMES_ALLOWED_CHAT_IDS en .env (tu chat id de Telegram). Sin eso el bot no arranca.")
+        sys.exit(1)
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # La guardia va en el grupo -1: corre antes que cualquier comando, botón o mensaje.
+    app.add_handler(build_guard_handler(allowed), group=GUARD_GROUP)
 
     for handler in cmd_handlers():
         app.add_handler(handler)
