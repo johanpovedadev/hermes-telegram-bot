@@ -1,0 +1,32 @@
+name: crear-issues-hermes
+# Se usa una sola vez para crear los issues del plan de Hermes; la rama se borra después.
+on:
+  push:
+    branches: [chore/crear-issues-hermes]
+permissions:
+  issues: write
+  contents: read
+jobs:
+  crear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Crear issues (sin duplicar por título)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          for l in "hermes:listo:0e8a16" "hermes:en-curso:fbca04" "hermes:bloqueado:d73a4a" "hermes:plan:5319e7"; do
+            name="${l%:*}"; color="${l##*:}"
+            gh label create "$name" --repo "$REPO" --color "$color" --force >/dev/null || true
+          done
+          existing=$(gh issue list --repo "$REPO" --state all --limit 200 --json title --jq '.[].title')
+          n=$(jq length .github/hermes/issues.json)
+          for i in $(seq 0 $((n-1))); do
+            title=$(jq -r ".[$i].title" .github/hermes/issues.json)
+            if printf '%s\n' "$existing" | grep -qxF "$title"; then echo "ya existe: $title"; continue; fi
+            jq -r ".[$i].body" .github/hermes/issues.json > body.md
+            gh issue create --repo "$REPO" --title "$title" --body-file body.md --label "hermes:plan"
+          done
+          gh issue list --repo "$REPO" --label "hermes:plan" --limit 20
