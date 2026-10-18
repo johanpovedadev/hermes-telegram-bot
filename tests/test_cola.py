@@ -1,0 +1,271 @@
+"""Issue #9: la cola trabaja en un worktree, pide aprobación antes del push y se frena sola. Git real; GitHub y agente simulados."""
+import asyncio
+import json
+import os
+import subprocess
+
+import pytest
+
+from bot.core import cola as cl
+from bot.core.estado import run_cmd
+from bot.core.jobs import JobManager, JobStore
+from bot.core.projects import Proyecto, Registro
+
+
+def git(*a, cwd=None):
+    return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def mundo(tmp_path, monkeypatch):
+    for k in ["HERMES_COLA_MAX_FALLAS", "HERMES_COLA_TOPE_DIA", "HERMES_WORKTREES_DIR"]:
+        monkeypatch.delenv(k, raising=False)
+    for k, v in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}.items():
+        monkeypatch.setenv(k, v)
+    origen = tmp_path / "origen.git"
+    git("init", "-q", "--bare", "-b", "develop", str(origen))
+    carpeta = tmp_path / "proyecto"
+    git("clone", "-q", str(origen), str(carpeta))
+    git("checkout", "-q", "-b", "develop", cwd=carpeta)
+    (carpeta / "app.py").write_text("x = 1\n")
+    git("add", ".", cwd=carpeta)
+    git("commit", "-q", "-m", "inicio", cwd=carpeta)
+    git("push", "-q", "origin", "develop", cwd=carpeta)
+
+    p = Proyecto(nombre="demo", repo="johan/demo", carpeta=str(carpeta), pruebas="pruebas-demo", habilitado=True)
+    otro = Proyecto(nombre="prod", repo="johan/prod", carpeta=str(carpeta), pruebas="x", habilitado=False)
+    registro = Registro([p, otro], [], [])
+
+    class GH:
+        def __init__(self):
+            self.issues = {("johan/demo", 7): {"title": "Agregar saludo", "body": "Que diga hola", "labels": {"hermes:listo"}}}
+            self.llamadas = []
+            self.comentarios = []
+
+        def __call__(self, argv, timeout):
+            if argv[0] != "gh":
+                return run_cmd(argv, timeout)
+            self.llamadas.append(argv)
+            repo = argv[argv.index("--repo") + 1]
+            if argv[1:3] == ["issue", "list"]:
+                assert repo != "johan/prod", "nunca mira proyectos deshabilitados"
+                lista = [{"number": n, "title": d["title"], "body": d["body"]} for (r, n), d in self.issues.items()
+                         if r == repo and "hermes:listo" in d["labels"]]
+                return 0, json.dumps(lista), ""
+            n = int(argv[3])
+            if argv[1:3] == ["issue", "edit"]:
+                labels = self.issues[(repo, n)]["labels"]
+                if "--remove-label" in argv:
+                    labels.discard(argv[argv.index("--remove-label") + 1])
+                if "--add-label" in argv:
+                    labels.add(argv[argv.index("--add-label") + 1])
+                return 0, "", ""
+            if argv[1:3] == ["issue", "comment"]:
+                self.comentarios.append((n, argv[-1]))
+                return 0, "", ""
+            return 1, "", "no simulado"
+
+    class Agente:
+        def __init__(self):
+            self.codigo, self.pruebas, self.escribe = 0, 0, True
+            self.cwds = []
+
+        async def __call__(self, argv, cwd, timeout, shell=False):
+            if shell:
+                return self.pruebas, "", "AssertionError: 1 != 2" if self.pruebas else "", False
+            self.cwds.append(cwd)
+            if self.escribe:
+                with open(os.path.join(cwd, "saludo.py"), "w") as f:
+                    f.write("print('hola')\n")
+            return self.codigo, "listo", "", False
+
+    gh, agente = GH(), Agente()
+    manager = JobManager(store=JobStore(str(tmp_path / "jobs.db")), runner=agente)
+    estado = cl.EstadoCola(str(tmp_path / "cola.json"))
+    c = cl.Cola(manager, lambda: registro, run=gh, estado=estado, hoy=lambda: "2026-10-17", worktrees_dir=str(tmp_path / "wt"))
+    avisos = []
+
+    async def notify(t):
+        avisos.append(t)
+
+    return dict(cola=c, gh=gh, agente=agente, origen=origen, carpeta=carpeta, avisos=avisos, notify=notify, tmp=tmp_path)
+
+
+def si(respuesta, preguntas=None):
+    async def pedir(texto):
+        if preguntas is not None:
+            preguntas.append(texto)
+        return respuesta
+    return pedir
+
+
+def labels(m, n=7):
+    return m["gh"].issues[("johan/demo", n)]["labels"]
+
+
+def ramas_remotas(m):
+    return git("branch", "--list", cwd=m["origen"])
+
+
+def test_camino_feliz_worktree_aprobacion_y_push(mundo):
+    m = mundo
+    preguntas = []
+    r = asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
+    assert r == "subido"
+    wt = m["tmp"] / "wt" / "demo" / "issue-7"
+    assert m["agente"].cwds == [str(wt)], "el agente trabaja en el worktree, nunca en la carpeta del proyecto"
+    assert not (m["carpeta"] / "saludo.py").exists()
+    assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=m["carpeta"]).strip() == "develop"
+    assert "feature/issue-7" in ramas_remotas(m)
+    assert git("log", "-1", "--format=%s", "feature/issue-7", cwd=m["origen"]).strip() == "feat: Agregar saludo (#7)"
+    assert "develop" in ramas_remotas(m) and git("log", "--oneline", "develop", cwd=m["origen"]).count("\n") == 1, "develop no se toca"
+    assert labels(m) == {"hermes:hecho"}
+    assert "¿Lo subo a GitHub?" in preguntas[0] and "1 file changed" in preguntas[0]
+    assert any("compare/develop...feature/issue-7" in a for a in m["avisos"])
+    assert m["cola"].estado.hechos_hoy == 1
+
+
+def test_sin_aprobacion_no_hay_push(mundo):
+    m = mundo
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(False))) == "rechazado"
+    assert "feature/issue-7" not in ramas_remotas(m)
+    assert labels(m) == {"hermes:rechazado"}
+    wt = m["tmp"] / "wt" / "demo" / "issue-7"
+    assert git("log", "-1", "--format=%s", cwd=wt).strip() == "feat: Agregar saludo (#7)", "el trabajo queda guardado en local"
+
+
+def test_pruebas_que_fallan_pausan_la_cola_sin_preguntar_ni_subir(mundo):
+    m = mundo
+    m["agente"].pruebas = 1
+    preguntas = []
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "pruebas fallaron"
+    assert preguntas == [] and "feature/issue-7" not in ramas_remotas(m)
+    assert m["cola"].estado.pausada and labels(m) == {"hermes:fallo"}
+    assert m["gh"].comentarios and "No se subió nada" in m["gh"].comentarios[0][1]
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))).startswith("⏸️")
+    estado2 = cl.EstadoCola(m["cola"].estado.ruta)
+    assert estado2.pausada, "la pausa sobrevive un reinicio del bot"
+
+
+def test_dos_fallas_seguidas_pausan(mundo):
+    m = mundo
+    m["gh"].issues[("johan/demo", 8)] = {"title": "Otro", "body": "", "labels": {"hermes:listo"}}
+    m["gh"].issues[("johan/demo", 9)] = {"title": "Tercero", "body": "", "labels": {"hermes:listo"}}
+    m["agente"].codigo = 1
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True)))
+    assert not m["cola"].estado.pausada and m["cola"].estado.fallas_seguidas == 1
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True)))
+    assert m["cola"].estado.pausada and "2 fallas seguidas" in m["cola"].estado.motivo
+    assert labels(m, 9) == {"hermes:listo"}, "el tercero no se toca"
+    m["cola"].estado.reanudar()
+    assert m["cola"].estado.fallas_seguidas == 0
+
+
+def test_un_exito_reinicia_las_fallas(mundo):
+    m = mundo
+    m["gh"].issues[("johan/demo", 8)] = {"title": "Otro", "body": "", "labels": {"hermes:listo"}}
+    m["agente"].codigo = 1
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True)))
+    m["agente"].codigo = 0
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert m["cola"].estado.fallas_seguidas == 0
+
+
+def test_agente_sin_cambios_es_falla(mundo):
+    m = mundo
+    m["agente"].escribe = False
+    preguntas = []
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "fallo"
+    assert preguntas == [] and labels(m) == {"hermes:fallo"}
+
+
+def test_tope_diario(mundo, monkeypatch):
+    m = mundo
+    m["cola"].tope_dia = 1
+    m["gh"].issues[("johan/demo", 8)] = {"title": "Otro", "body": "", "labels": {"hermes:listo"}}
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))).startswith("🛑 Tope diario")
+    m["cola"].hoy = lambda: "2026-10-18"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido", "al otro día sigue"
+
+
+def test_worktree_ya_existe_no_pisa_nada(mundo):
+    m = mundo
+    wt = m["tmp"] / "wt" / "demo" / "issue-7"
+    wt.mkdir(parents=True)
+    (wt / "importante.txt").write_text("no borrar")
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "fallo"
+    assert (wt / "importante.txt").read_text() == "no borrar"
+    assert any("ya existe" in a for a in m["avisos"])
+
+
+def test_sin_issues_y_pausa_manual(mundo):
+    m = mundo
+    m["gh"].issues.clear()
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "💤 No hay issues con hermes:listo"
+    m["cola"].estado.pausar("pausada a mano con /pausar")
+    assert "pausada a mano" in m["cola"].resumen()
+
+
+def test_resumen_lista_pendientes(mundo):
+    texto = mundo["cola"].resumen()
+    assert "▶️ Activa" in texto and "demo #7 Agregar saludo" in texto and "Hoy: 0/5" in texto
+
+
+def test_bucle_pausa_ante_error_inesperado(mundo):
+    m = mundo
+
+    async def explota(notify, pedir):
+        raise RuntimeError("bum")
+
+    m["cola"].procesar_uno = explota
+    asyncio.run(cl.bucle_cola(m["cola"], m["notify"], si(True), cada_s=0, veces=1))
+    assert m["cola"].estado.pausada and "bum" in m["cola"].estado.motivo
+
+
+def test_botones_de_aprobacion():
+    from bot.handlers import cola as hc
+
+    class Bot:
+        def __init__(self):
+            self.markup = None
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.markup = reply_markup
+
+    class Msg:
+        text = "¿Lo subo?"
+
+    class Query:
+        def __init__(self, data):
+            self.data, self.message, self.editado, self.respuesta = data, Msg(), None, None
+
+        async def answer(self, *a, **k):
+            self.respuesta = (a, k)
+
+        async def edit_message_text(self, t):
+            self.editado = t
+
+    class Upd:
+        def __init__(self, q):
+            self.callback_query = q
+
+    async def caso():
+        bot = Bot()
+        tarea = asyncio.create_task(hc.crear_pedir_aprobacion(bot, 1)("¿Lo subo?"))
+        await asyncio.sleep(0)
+        data = bot.markup.inline_keyboard[0][0].callback_data
+        assert data.startswith("cola:si:")
+        q = Query(data)
+        await hc.responder_aprobacion(Upd(q), None)
+        assert await tarea is True and q.editado.endswith("Subiendo…")
+        viejo = Query(data)
+        await hc.responder_aprobacion(Upd(viejo), None)
+        assert viejo.respuesta[1].get("show_alert"), "un botón viejo no hace nada"
+
+        tarea = asyncio.create_task(hc.crear_pedir_aprobacion(bot, 1)("¿Lo subo?"))
+        await asyncio.sleep(0)
+        await hc.responder_aprobacion(Upd(Query(bot.markup.inline_keyboard[0][1].callback_data)), None)
+        assert await tarea is False
+
+    asyncio.run(caso())

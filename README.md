@@ -27,6 +27,31 @@ python bot.py
 | `/run [proyecto] [tarea]` | Lanza el agente en segundo plano (solo proyectos habilitados en `projects.yaml`) |
 | `/trabajos` | Trabajos corriendo y los últimos 10 |
 | `/estado` | PM2, bots, puertos, CI y trabajos (datos reales, sin IA) |
+| `/cola` | Issues con `hermes:listo` y estado de la cola |
+| `/pausar` · `/reanudar` | Frenar o seguir la cola (`/reanudar` pone las fallas en 0) |
+
+## Cola de issues
+
+Con `HERMES_COLA=1`, cada 10 minutos Hermes busca issues abiertos con la etiqueta `hermes:listo` en los proyectos
+**habilitados** de `projects.yaml` y los trabaja uno por uno:
+
+1. Crea un worktree en `~/.jarvis/worktrees/<proyecto>/issue-<n>` con la rama `feature/issue-<n>` desde la rama base.
+   La carpeta del proyecto (donde corre producción) no se toca.
+2. El agente resuelve el issue ahí. Luego Hermes corre las pruebas del proyecto.
+3. Si pasan, hace un commit **local** y te pregunta por Telegram: 🚀 Subir / 🗑️ No subir.
+4. Solo con 🚀 hace `git push` de la rama y te manda el enlace para abrir el PR. El PR y el merge siempre los haces tú.
+
+Frenos: si las pruebas fallan la cola se pausa; también con 2 fallas seguidas del agente o al llegar a 5 issues en el
+día. La pausa sobrevive reinicios: se sigue con `/reanudar`.
+
+Crea las etiquetas una vez en cada repo:
+
+```bash
+for e in listo trabajando esperando-aprobacion hecho fallo rechazado; do gh label create "hermes:$e" --repo DUEÑO/REPO; done
+```
+
+Si el bot se reinicia a mitad de un issue, ese issue queda con `hermes:trabajando` y su worktree en disco: revísalo y
+vuelve a ponerle `hermes:listo` (borrando antes el worktree con `git worktree remove`) si quieres que lo reintente.
 
 ## Vigía (avisos automáticos)
 

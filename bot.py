@@ -8,23 +8,29 @@ from bot.core.security import parse_allowed, build_guard_handler, GUARD_GROUP
 from bot.handlers.commands import get_handlers as cmd_handlers
 from bot.handlers.run import get_handlers as run_handlers
 from bot.handlers.callbacks import get_handlers as callback_handlers
+from bot.handlers.cola import get_handlers as cola_handlers
 from bot.handlers.chat import get_handlers as chat_handlers
 
 from telegram.ext import ApplicationBuilder
 
 
 def crear_post_init(allowed):
-    """Al arrancar: vigía de PM2 en segundo plano (issue #7). Avisa al HERMES_CHAT_ID o al primer chat permitido."""
+    """Al arrancar: vigía de PM2 (#7) y cola de issues (#9) en segundo plano. Avisan al HERMES_CHAT_ID o al primer chat permitido."""
     async def post_init(app):
-        if os.environ.get("HERMES_VIGIA", "1") == "0":
-            return
         from bot.core.vigia import Vigia, bucle_vigia
         chat_id = int(os.environ.get("HERMES_CHAT_ID") or sorted(allowed)[0])
 
         async def notify(texto):
             await app.bot.send_message(chat_id=chat_id, text=texto[:4000])
 
-        app.create_task(bucle_vigia(Vigia(), notify))
+        if os.environ.get("HERMES_VIGIA", "1") != "0":
+            app.create_task(bucle_vigia(Vigia(), notify))
+
+        # Cola de issues (issue #9): apagada por defecto; trabaja sola, así que se prende a propósito con HERMES_COLA=1.
+        if os.environ.get("HERMES_COLA", "0") == "1":
+            from bot.core.cola import bucle_cola
+            from bot.handlers.cola import crear_pedir_aprobacion, get_cola
+            app.create_task(bucle_cola(get_cola(), notify, crear_pedir_aprobacion(app.bot, chat_id)))
     return post_init
 
 
@@ -53,6 +59,8 @@ def main():
     for handler in run_handlers():
         app.add_handler(handler)
     for handler in callback_handlers():
+        app.add_handler(handler)
+    for handler in cola_handlers():
         app.add_handler(handler)
     for handler in chat_handlers():
         app.add_handler(handler)
