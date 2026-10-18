@@ -118,9 +118,9 @@ async def test_run_rechaza_deshabilitado(mock_update, mock_context, monkeypatch,
     from unittest.mock import AsyncMock, patch
     from bot.handlers.run import ejecutar_issue
     mock_context.args = ["prod", "borra todo"]
-    with patch("bot.handlers.run.ejecutar_opencode", new_callable=AsyncMock) as agente:
+    with patch("bot.handlers.run.get_manager") as manager:
         await ejecutar_issue(mock_update, mock_context)
-    agente.assert_not_called()
+    manager.assert_not_called()
     assert "deshabilitado" in mock_update.message.reply_text.call_args[0][0]
 
 

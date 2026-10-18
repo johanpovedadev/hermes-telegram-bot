@@ -14,11 +14,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡ *Jarvis León Activo*\n\n"
         "📋 *Comandos Disponibles:*\n\n"
         "*Ejecución:*\n"
-        "• `/run [proyecto] [tarea]` - Ejecutar tarea con OpenCode\n"
+        "• `/run [proyecto] [tarea]` - Ejecutar tarea con el agente (en segundo plano)\n"
+        "• `/trabajos` - Trabajos corriendo y últimos 10\n"
         "• `/chat [pregunta]` - Consulta IA (DeepSeek)\n\n"
         "*Información:*\n"
-        "• `/proyectos` - Listar proyectos disponibles\n"
-        "• `/status` - Estado de OpenCode CLI\n\n"
+        "• `/proyectos` - Proyectos de projects.yaml\n"
+        "• `/status` - Estado del agente (OpenCode o Claude Code)\n\n"
         "*Notificaciones & Auditoría:*\n"
         "• `/notificaciones` - Ver tareas pendientes de aprobación\n"
         "• `/historial` - Últimas 10 tareas completadas\n"
@@ -29,24 +30,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Versión del agente configurado (HERMES_AGENT: opencode o claude)."""
+    from bot.core.jobs import agente_configurado
+    import shutil
+    agente = agente_configurado()
     try:
-        result = await asyncio.to_thread(
-            subprocess.run, ["opencode", "--version"],
-            capture_output=True, text=True, timeout=10
-        )
+        exe = shutil.which(agente) or agente
+        result = await asyncio.to_thread(subprocess.run, [exe, "--version"], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            await update.message.reply_text(
-                f"✅ OpenCode CLI: `{result.stdout.strip()}`",
-                parse_mode="Markdown"
-            )
+            await update.message.reply_text(f"✅ Agente `{agente}`: `{result.stdout.strip()}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text("❌ OpenCode CLI no responde.")
+            await update.message.reply_text(f"❌ El agente `{agente}` no responde.", parse_mode="Markdown")
     except FileNotFoundError:
-        await update.message.reply_text(
-            "❌ OpenCode CLI no instalado.\n"
-            "Ejecuta: `npm install -g opencode-ai`",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"❌ El agente `{agente}` no está instalado en este equipo.", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
