@@ -3,7 +3,8 @@ import uuid
 import subprocess
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CommandHandler, ContextTypes
-from bot.core.config import DOCUMENTS_PATH, TIMEOUT_SECONDS, MAX_OUTPUT_LENGTH
+from bot.core.config import TIMEOUT_SECONDS, MAX_OUTPUT_LENGTH
+from bot.core import projects
 from bot.core.opencode_runner import ejecutar_opencode
 from bot.core.notifications import NotificationManager
 from bot.handlers.callbacks import crear_botones_notificacion
@@ -20,16 +21,18 @@ async def ejecutar_issue(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        proyecto = args[0]
         prompt = " ".join(args[1:])
-        target_path = os.path.join(DOCUMENTS_PATH, proyecto)
-
-        if not os.path.exists(target_path):
-            await update.message.reply_text(
-                f"❌ No existe `{proyecto}`.",
-                parse_mode="Markdown"
-            )
+        # Solo proyectos de projects.yaml y habilitados (issue #8): antes /run aceptaba cualquier carpeta de Documentos.
+        registro = projects.cargar()
+        if not registro.valido:
+            await update.message.reply_text("❌ projects.yaml tiene errores:\n" + "\n".join(f"• {e}" for e in registro.errores[:5]))
             return
+        info, motivo = registro.para_trabajar(args[0])
+        if not info:
+            await update.message.reply_text(motivo, parse_mode="Markdown")
+            return
+        proyecto = info.nombre
+        target_path = info.carpeta
 
         await update.message.reply_text(
             f"⏳ *Ejecutando en `{proyecto}`...*\n📝 _{prompt}_",

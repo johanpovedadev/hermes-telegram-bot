@@ -3,6 +3,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from bot.handlers.run import ejecutar_issue
 from bot.core.notifications import NotificationManager
 
+@pytest.fixture(autouse=True)
+def registro_falso(monkeypatch, tmp_path):
+    """projects.yaml de prueba con 'proyecto-1' habilitado (issue #8)."""
+    (tmp_path / "proyecto-1").mkdir()
+    (tmp_path / "projects.yaml").write_text(
+        "proyectos:\n  - nombre: proyecto-1\n    carpeta: proyecto-1\n    pruebas: echo ok\n    habilitado: true\n",
+        encoding="utf-8")
+    from bot.core import projects
+    real = projects.cargar
+    monkeypatch.setattr("bot.handlers.run.projects.cargar", lambda *a, **k: real(str(tmp_path / "projects.yaml"), str(tmp_path)))
+
+
 @pytest.fixture
 def nm_mock(monkeypatch, temp_data_dir):
     """Mock de NotificationManager."""
@@ -27,12 +39,11 @@ class TestRunHandler:
         """Test: proyecto no existe."""
         mock_context.args = ["proyecto-no-existe", "hacer algo"]
 
-        with patch("bot.handlers.run.os.path.exists", return_value=False):
-            await ejecutar_issue(mock_update, mock_context)
+        await ejecutar_issue(mock_update, mock_context)
 
         mock_update.message.reply_text.assert_called_once()
         call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "No existe" in call_text
+        assert "no está en projects.yaml" in call_text
 
     @pytest.mark.asyncio
     async def test_ejecutar_issue_exitoso(self, mock_update, mock_context, nm_mock):
@@ -45,7 +56,7 @@ class TestRunHandler:
             "stderr": ""
         }
 
-        with patch("bot.handlers.run.os.path.exists", return_value=True):
+        if True:
             with patch("bot.handlers.run.ejecutar_opencode", new_callable=AsyncMock) as mock_opencode:
                 mock_opencode.return_value = mock_result
 
@@ -74,7 +85,7 @@ class TestRunHandler:
             "stderr": "Build failed: syntax error"
         }
 
-        with patch("bot.handlers.run.os.path.exists", return_value=True):
+        if True:
             with patch("bot.handlers.run.ejecutar_opencode", new_callable=AsyncMock) as mock_opencode:
                 mock_opencode.return_value = mock_result
 
@@ -93,7 +104,7 @@ class TestRunHandler:
         """Test: timeout en ejecución."""
         mock_context.args = ["proyecto-1", "long-task"]
 
-        with patch("bot.handlers.run.os.path.exists", return_value=True):
+        if True:
             with patch("bot.handlers.run.ejecutar_opencode", new_callable=AsyncMock) as mock_opencode:
                 import subprocess
                 mock_opencode.side_effect = subprocess.TimeoutExpired("cmd", 30)
