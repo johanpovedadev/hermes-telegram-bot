@@ -6,3 +6,7 @@ dist/
 build/
 .venv/
 venv/
+*.log
+*.bundle
+*.tgz
+.claude/settings.local.json
