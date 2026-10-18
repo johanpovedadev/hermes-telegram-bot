@@ -13,6 +13,21 @@ from bot.handlers.chat import get_handlers as chat_handlers
 from telegram.ext import ApplicationBuilder
 
 
+def crear_post_init(allowed):
+    """Al arrancar: vigía de PM2 en segundo plano (issue #7). Avisa al HERMES_CHAT_ID o al primer chat permitido."""
+    async def post_init(app):
+        if os.environ.get("HERMES_VIGIA", "1") == "0":
+            return
+        from bot.core.vigia import Vigia, bucle_vigia
+        chat_id = int(os.environ.get("HERMES_CHAT_ID") or sorted(allowed)[0])
+
+        async def notify(texto):
+            await app.bot.send_message(chat_id=chat_id, text=texto[:4000])
+
+        app.create_task(bucle_vigia(Vigia(), notify))
+    return post_init
+
+
 def main():
     if not BOT_TOKEN:
         print("Configura HERMES_BOT_TOKEN en .env o variable de entorno.")
@@ -29,6 +44,7 @@ def main():
         sys.exit(1)
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.post_init = crear_post_init(allowed)
     # La guardia va en el grupo -1: corre antes que cualquier comando, botón o mensaje.
     app.add_handler(build_guard_handler(allowed), group=GUARD_GROUP)
 
