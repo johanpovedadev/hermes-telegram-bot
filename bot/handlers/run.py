@@ -76,8 +76,20 @@ async def trabajos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/estado: PM2, bots, CI y trabajos, con datos reales y sin IA (issue #6)."""
+    import asyncio
+    from bot.core.estado import construir_estado
+    try:
+        texto = await asyncio.to_thread(construir_estado, projects.cargar(), get_manager())
+        await update.message.reply_text(texto)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
 def get_handlers():
     return [
         CommandHandler("run", ejecutar_issue),
         CommandHandler("trabajos", trabajos),
+        CommandHandler("estado", estado),
     ]

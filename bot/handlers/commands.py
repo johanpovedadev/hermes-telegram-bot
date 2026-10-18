@@ -18,6 +18,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/trabajos` - Trabajos corriendo y últimos 10\n"
         "• `/chat [pregunta]` - Consulta IA (DeepSeek)\n\n"
         "*Información:*\n"
+        "• `/estado` - PM2, bots, CI y trabajos (sin IA)\n"
         "• `/proyectos` - Proyectos de projects.yaml\n"
         "• `/status` - Estado del agente (OpenCode o Claude Code)\n\n"
         "*Notificaciones & Auditoría:*\n"
