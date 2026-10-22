@@ -43,12 +43,17 @@ def mundo(tmp_path, monkeypatch):
             self.comentarios = []
             self.prs = []
             self.pr_falla = False
+            self.merges = []
+            self.merge_falla = False
 
         def __call__(self, argv, timeout):
             if argv[0] != "gh":
                 return run_cmd(argv, timeout)
             self.llamadas.append(argv)
             repo = argv[argv.index("--repo") + 1]
+            if argv[1:3] == ["pr", "merge"]:
+                self.merges.append(argv)
+                return (1, "", "base branch policy prohibits the merge") if self.merge_falla else (0, "", "")
             if argv[1:3] == ["pr", "create"]:
                 self.prs.append(argv)
                 if self.pr_falla:
@@ -98,7 +103,7 @@ def mundo(tmp_path, monkeypatch):
                 if self.nuevo_archivo:
                     with open(os.path.join(cwd, f"paso{len(self.prompts)}.py"), "w") as f:
                         f.write("x = 1\n")
-            return self.codigo, "listo", "", False
+            return self.codigo, "listo\n\nCÓMO PROBAR:\n1. node index.js y abre el puerto 3000", "", False
 
     gh, agente = GH(), Agente()
     manager = JobManager(store=JobStore(str(tmp_path / "jobs.db")), runner=agente)
@@ -132,7 +137,7 @@ def test_camino_feliz_worktree_aprobacion_y_push(mundo):
     m = mundo
     preguntas = []
     r = asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
-    assert r == "subido"
+    assert r == "integrado"
     wt = m["tmp"] / "wt" / "demo" / "issue-7"
     assert m["agente"].cwds and set(m["agente"].cwds) == {str(wt)}, "el agente trabaja en el worktree, nunca en la carpeta del proyecto"
     assert not (m["carpeta"] / "saludo.py").exists()
@@ -141,22 +146,54 @@ def test_camino_feliz_worktree_aprobacion_y_push(mundo):
     assert git("log", "-1", "--format=%s", "feature/issue-7", cwd=m["origen"]).strip() == "feat: Agregar saludo (#7)"
     assert "develop" in ramas_remotas(m) and git("log", "--oneline", "develop", cwd=m["origen"]).count("\n") == 1, "develop no se toca"
     assert labels(m) == {"hermes:hecho"}
-    assert "¿Lo subo a GitHub" in preguntas[0] and "1 file changed" in preguntas[0]
+    assert "¿Funciona?" in preguntas[0] and "1 file changed" in preguntas[0] and "pull/1" in preguntas[0]
+    assert "abre el puerto" in preguntas[0], "los pasos de CÓMO PROBAR del agente llegan a Johan"
+    mg = m["gh"].merges[0]
+    assert mg[3] == "feature/issue-7" and "--squash" in mg and "--delete-branch" in mg
+    assert not wt.exists(), "tras el merge se borra el worktree"
     assert "✅ Revisión: APROBADO" in preguntas[0]
     pr = m["gh"].prs[0]
     assert pr[pr.index("--base") + 1] == "develop" and pr[pr.index("--head") + 1] == "feature/issue-7"
     assert "Closes #7" in pr[pr.index("--body") + 1]
-    assert any("https://github.com/johan/demo/pull/1" in a for a in m["avisos"])
+    assert any("merge a develop hecho" in a for a in m["avisos"])
     assert m["cola"].estado.hechos_hoy == 1
 
 
-def test_sin_aprobacion_no_hay_push(mundo):
+def test_no_funciona_deja_el_pr_abierto_sin_merge(mundo):
     m = mundo
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(False))) == "rechazado"
-    assert "feature/issue-7" not in ramas_remotas(m)
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(False))) == "no funciona"
+    assert "feature/issue-7" in ramas_remotas(m), "la rama sí se sube para poder probarla"
+    assert m["gh"].prs and m["gh"].merges == [], "sin el ✅ de Johan no hay merge"
     assert labels(m) == {"hermes:rechazado"}
-    wt = m["tmp"] / "wt" / "demo" / "issue-7"
-    assert git("log", "-1", "--format=%s", cwd=wt).strip() == "feat: Agregar saludo (#7)", "el trabajo queda guardado en local"
+    assert (m["tmp"] / "wt" / "demo" / "issue-7").exists(), "el worktree queda para corregir"
+    assert any("/pedir demo" in a for a in m["avisos"])
+
+
+def test_merge_que_falla_avisa_con_el_enlace(mundo):
+    m = mundo
+    m["gh"].merge_falla = True
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "merge falló"
+    assert any("policy prohibits" in a and "pull/1" in a for a in m["avisos"])
+
+
+def test_merge_apagado(mundo, monkeypatch):
+    m = mundo
+    monkeypatch.setenv("HERMES_MERGE", "0")
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "aprobado"
+    assert m["gh"].merges == [] and labels(m) == {"hermes:hecho"}
+
+
+def test_nunca_hace_merge_a_main(mundo):
+    m = mundo
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True)))
+    pr = m["gh"].prs[0]
+    assert pr[pr.index("--base") + 1] == "develop"
+
+
+@pytest.mark.parametrize("salida,esperado", [
+    ("hice X\n\nCÓMO PROBAR:\n1. corre npm test", "1. corre npm test"), ("sin pasos", "• (el agente no dejó pasos; mira el PR)")])
+def test_como_probar(salida, esperado):
+    assert cl.como_probar(salida) == esperado
 
 
 def test_pruebas_que_fallan_pausan_la_cola_sin_preguntar_ni_subir(mundo):
@@ -192,7 +229,7 @@ def test_un_exito_reinicia_las_fallas(mundo):
     m["agente"].codigo = 1
     asyncio.run(m["cola"].procesar_uno(m["notify"], si(True)))
     m["agente"].codigo = 0
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "integrado"
     assert m["cola"].estado.fallas_seguidas == 0
 
 
@@ -208,10 +245,10 @@ def test_tope_diario(mundo, monkeypatch):
     m = mundo
     m["cola"].tope_dia = 1
     m["gh"].issues[("johan/demo", 8)] = {"title": "Otro", "body": "", "labels": {"hermes:listo"}}
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "integrado"
     assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))).startswith("🛑 Tope diario")
     m["cola"].hoy = lambda: "2026-10-18"
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido", "al otro día sigue"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "integrado", "al otro día sigue"
 
 
 def test_worktree_ya_existe_no_pisa_nada(mundo):
@@ -283,7 +320,7 @@ def test_botones_de_aprobacion():
         assert data.startswith("cola:si:")
         q = Query(data)
         await hc.responder_aprobacion(Upd(q), None)
-        assert await tarea is True and q.editado.endswith("Subiendo…")
+        assert await tarea is True and q.editado.endswith("Haciendo el merge…")
         viejo = Query(data)
         await hc.responder_aprobacion(Upd(viejo), None)
         assert viejo.respuesta[1].get("show_alert"), "un botón viejo no hace nada"
@@ -299,7 +336,7 @@ def test_botones_de_aprobacion():
 def test_reintento_con_el_error_de_las_pruebas(mundo):
     m = mundo
     m["agente"].pruebas_seq = [1, 0]
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "integrado"
     assert len(m["agente"].prompts) == 2 and "AssertionError: 1 != 2" in m["agente"].prompts[1]
     assert any(a.startswith("🔁") for a in m["avisos"])
 
@@ -316,11 +353,11 @@ def test_revisor_pide_cambios_y_se_corrigen(mundo):
     m = mundo
     m["agente"].veredictos = ["CAMBIOS\n- falta la prueba del saludo", "APROBADO\n- listo"]
     preguntas = []
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "integrado"
     assert len(m["agente"].revisiones) == 2 and "saludo.py" in m["agente"].revisiones[0], "el revisor ve el diff"
     assert "falta la prueba del saludo" in m["agente"].prompts[1]
     assert "✅ Revisión: APROBADO" in preguntas[0]
-    log = git("log", "--format=%s", "origin/develop..feature/issue-7", cwd=m["tmp"] / "wt" / "demo" / "issue-7")
+    log = git("log", "--format=%s", "develop..feature/issue-7", cwd=m["origen"])
     assert log.splitlines() == ["fix: ajustes de la revisión (#7)", "feat: Agregar saludo (#7)"]
 
 
@@ -339,7 +376,7 @@ def test_correccion_que_rompe_pruebas_se_descarta(mundo):
     m["agente"].pruebas_seq = [0, 1]
     m["agente"].nuevo_archivo = True
     preguntas = []
-    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(False, preguntas)))
     wt = m["tmp"] / "wt" / "demo" / "issue-7"
     assert git("status", "--porcelain", cwd=wt).strip() == "", "no quedan cambios rotos sin commit"
     assert git("log", "--format=%s", "origin/develop..HEAD", cwd=wt).splitlines() == ["feat: Agregar saludo (#7)"]
@@ -350,7 +387,7 @@ def test_revisor_caido_no_frena(mundo):
     m = mundo
     m["agente"].veredictos = ["ERROR"]
     preguntas = []
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "integrado"
     assert "⚪ Revisión: sin veredicto" in preguntas[0] and "no pudo correr" in preguntas[0]
 
 
@@ -367,8 +404,9 @@ def test_revisor_apagado(mundo, monkeypatch):
 def test_si_gh_no_abre_el_pr_queda_el_enlace(mundo):
     m = mundo
     m["gh"].pr_falla = True
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
-    assert any("compare/develop...feature/issue-7?expand=1" in a for a in m["avisos"])
+    preguntas = []
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
+    assert "compare/develop...feature/issue-7?expand=1" in preguntas[0]
 
 
 @pytest.mark.parametrize("salida,esperado", [
@@ -381,7 +419,7 @@ def test_preparar_corre_en_el_worktree_antes_del_agente(mundo):
     m = mundo
     p = m["cola"].registro_fn().obtener("demo")
     p.preparar = "python -c \"open('preparado.txt','w').write('ok')\""
-    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(False))) == "no funciona"
     assert (m["tmp"] / "wt" / "demo" / "issue-7" / "preparado.txt").exists()
     assert not (m["carpeta"] / "preparado.txt").exists()
 
@@ -391,3 +429,32 @@ def test_preparar_que_falla_es_falla(mundo):
     m["cola"].registro_fn().obtener("demo").preparar = "python -c \"import sys; sys.exit('sin red')\""
     assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "fallo"
     assert m["agente"].prompts == [] and any("sin red" in a for a in m["avisos"])
+
+
+def test_pedir_crea_issue_con_etiqueta():
+    from bot.handlers import cola as hc
+    llamadas = []
+
+    def run(argv, timeout):
+        llamadas.append(argv)
+        return 0, "Creating issue\nhttps://github.com/johan/demo/issues/50\n", ""
+
+    p = Proyecto(nombre="demo", repo="johan/demo", carpeta="/x", pruebas="t", habilitado=True)
+    url = hc.crear_issue(p, "que la heladería salude por el nombre. Y que sea corto", run=run)
+    assert url == "https://github.com/johan/demo/issues/50"
+    a = llamadas[0]
+    assert a[a.index("--label") + 1] == "hermes:listo" and a[a.index("--repo") + 1] == "johan/demo"
+    assert a[a.index("--title") + 1] == "Que la heladería salude por el nombre"
+
+
+def test_pedir_falla_con_mensaje():
+    from bot.handlers import cola as hc
+    p = Proyecto(nombre="demo", repo="johan/demo", carpeta="/x", pruebas="t", habilitado=True)
+    with pytest.raises(RuntimeError, match="not found"):
+        hc.crear_issue(p, "algo", run=lambda a, t: (1, "", "could not add label: 'hermes:listo' not found"))
+
+
+@pytest.mark.parametrize("pedido,titulo", [("x" * 100, "X" + "x" * 69), ("", "Pedido desde Telegram"), ("arregla el\nlogin", "Arregla el")])
+def test_titulo_de(pedido, titulo):
+    from bot.handlers import cola as hc
+    assert hc.titulo_de(pedido) == titulo

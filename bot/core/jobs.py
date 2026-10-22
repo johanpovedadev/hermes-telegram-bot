@@ -7,7 +7,8 @@
 - Si el agente termina bien, corre el comando de pruebas del proyecto (projects.yaml).
 - Registro en SQLite (~/.jarvis/hermes_jobs.db): proyecto, prompt, agente, inicio, fin, duración, código de salida y
   resultado de las pruebas. Un trabajo que quedó "corriendo" cuando el bot se reinició se marca "interrumpido".
-- Avisos: ▶️ empezó, ✅ terminó (duración y pruebas), ❌ falló (últimas líneas), ⏰ timeout.
+- Avisos: ▶️ empezó, ⏳ avance cada HERMES_AVANCE_MIN (10) min con los archivos que lleva cambiados, ✅ terminó
+  (duración y pruebas), ❌ falló (últimas líneas), ⏰ timeout.
 
 Nunca hace commit, push ni toca producción: eso es de la cola (issue #9) y siempre con aprobación de Johan.
 """
@@ -121,13 +122,31 @@ def _matar_arbol(pid: int) -> None:
         pass
 
 
+def avance_git(carpeta: str) -> str:
+    """Qué lleva el agente: archivos cambiados según git. Nunca falla."""
+    import subprocess
+    try:
+        st = subprocess.run(["git", "-C", carpeta, "status", "--porcelain"], capture_output=True, text=True, timeout=15)
+        if st.returncode != 0:
+            return ""
+        archivos = [l[3:] for l in st.stdout.splitlines() if l.strip()]
+        if not archivos:
+            return "\nAún sin archivos cambiados."
+        muestra = ", ".join(archivos[:5]) + (f" y {len(archivos) - 5} más" if len(archivos) > 5 else "")
+        return f"\n{len(archivos)} archivo(s) cambiado(s): {muestra}"
+    except Exception:
+        return ""
+
+
 class ProyectoOcupado(Exception):
     pass
 
 
 class JobManager:
-    def __init__(self, store: Optional[JobStore] = None, runner=None):
+    def __init__(self, store: Optional[JobStore] = None, runner=None, avance_cada_s: Optional[float] = None, avance_fn=None):
         self.store = store or JobStore()
+        self.avance_cada_s = avance_cada_s if avance_cada_s is not None else float(os.environ.get("HERMES_AVANCE_MIN", "10")) * 60
+        self.avance_fn = avance_fn or avance_git
         self._locks: Dict[str, int] = {}  # proyecto -> id del trabajo que lo tiene
         self._tasks: Dict[int, asyncio.Task] = {}
         self._runner = runner or self._run_proceso
@@ -178,13 +197,29 @@ class JobManager:
         except Exception:
             pass  # un aviso que falla nunca deja el candado tomado
 
+    async def _con_avances(self, coro, job_id: int, nombre: str, carpeta: str, notify: Notify, t0: float):
+        """Espera al agente y, mientras tanto, avisa cada avance_cada_s qué lleva."""
+        tarea = asyncio.ensure_future(coro)
+        if self.avance_cada_s <= 0:
+            return await tarea
+        while True:
+            hecho, _ = await asyncio.wait({tarea}, timeout=self.avance_cada_s)
+            if hecho:
+                return tarea.result()
+            try:
+                extra = await asyncio.to_thread(self.avance_fn, carpeta)
+            except Exception:
+                extra = ""
+            await self._avisar(notify, f"⏳ Trabajo #{job_id} en `{nombre}` sigue trabajando ({_dur(time.monotonic() - t0)}){extra}")
+
     async def _correr(self, job_id: int, proyecto, prompt: str, agente: str, notify: Notify):
         nombre = proyecto.nombre
         t0 = time.monotonic()
         estado, codigo, pruebas, salida, error = "fallo", None, None, "", ""
         try:
             await self._avisar(notify, f"▶️ Trabajo #{job_id} empezó en `{nombre}` ({agente})\n📝 {prompt[:200]}")
-            codigo, salida, error, vencido = await self._runner(AGENTES[agente](prompt), proyecto.carpeta, timeout_agente_s())
+            codigo, salida, error, vencido = await self._con_avances(
+                self._runner(AGENTES[agente](prompt), proyecto.carpeta, timeout_agente_s()), job_id, nombre, proyecto.carpeta, notify, t0)
             if vencido:
                 estado = "timeout"
                 await self._avisar(notify, f"⏰ Trabajo #{job_id} en `{nombre}`: se venció el tiempo ({_dur(timeout_agente_s())}) y se detuvo el agente.")

@@ -153,3 +153,42 @@ async def test_timeout_mata_tambien_a_los_hijos(tmp_path, avisos, agente_python,
     await asyncio.sleep(3)
     assert m.store.obtener(jid).estado == "timeout"
     assert not marca.exists(), "el proceso hijo del agente siguió vivo después del timeout"
+
+
+
+def test_avisa_avances_mientras_el_agente_trabaja(tmp_path):
+    import asyncio as aio
+    from bot.core.jobs import JobManager, JobStore
+    from bot.core.projects import Proyecto
+
+    async def lento(argv, cwd, timeout, shell=False):
+        if shell:
+            return 0, "", "", False
+        await aio.sleep(0.35)
+        return 0, "ok", "", False
+
+    avisos = []
+
+    async def notify(t):
+        avisos.append(t)
+
+    async def caso():
+        m = JobManager(store=JobStore(str(tmp_path / "j.db")), runner=lento, avance_cada_s=0.1,
+                       avance_fn=lambda c: "\n2 archivo(s) cambiado(s): a.py, b.py")
+        jid = m.iniciar(Proyecto("demo", "", str(tmp_path), "t"), "x", notify)
+        await m.esperar(jid)
+
+    aio.run(caso())
+    avances = [a for a in avisos if a.startswith("⏳")]
+    assert 2 <= len(avances) <= 4 and "a.py, b.py" in avances[0]
+    assert avisos[-1].startswith("✅")
+
+
+def test_avance_git(tmp_path):
+    import subprocess
+    from bot.core.jobs import avance_git
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    assert avance_git(str(tmp_path)) == "\nAún sin archivos cambiados."
+    (tmp_path / "nuevo.py").write_text("x")
+    assert "1 archivo(s) cambiado(s): nuevo.py" in avance_git(str(tmp_path))
+    assert avance_git(str(tmp_path / "no-existe")) == ""

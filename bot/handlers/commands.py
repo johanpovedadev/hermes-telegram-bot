@@ -19,6 +19,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/chat [pregunta]` - Consulta IA (DeepSeek)\n\n"
         "*Información:*\n"
         "• `/estado` - PM2, bots, CI y trabajos (sin IA)\n"
+        "• `/pedir [proyecto] [qué quieres]` - Le encargas algo; lo hace, te avisa y te pide probarlo\n"
         "• `/cola` - Issues con hermes:listo y estado de la cola\n"
         "• `/pausar` · `/reanudar` - Frenar o seguir la cola\n"
         "• `/proyectos` - Proyectos de projects.yaml\n"

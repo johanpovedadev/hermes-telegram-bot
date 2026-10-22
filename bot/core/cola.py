@@ -7,8 +7,10 @@ Por cada issue:
 3. Corre las pruebas del proyecto (projects.yaml). Si pasan, hace un commit LOCAL.
 4. Revisión automática: un segundo agente (HERMES_REVISOR) lee el diff con las reglas del repo y responde APROBADO o
    CAMBIOS. Si pide cambios, el agente los corrige una vez y se vuelve a revisar.
-5. Pide aprobación por Telegram (con el veredicto de la revisión). Solo con "Subir" hace `git push` de la rama y abre el
-   PR a la rama base. Nunca hace merge ni toca `main`.
+5. Sube la rama y abre el PR a la rama base (una rama feature/* es reversible).
+6. Te pide que lo pruebes (con los pasos que dejó el agente). Con ✅ hace el merge del PR a la rama base (squash) y borra
+   el worktree; con ❌ deja el PR abierto. Nunca toca `main`: pasar a producción sigue siendo tuyo (HERMES_MERGE=0 apaga
+   el merge automático).
 
 Si las pruebas fallan, el agente tiene HERMES_COLA_REINTENTOS (1) intento más con el error de las pruebas antes de frenar.
 
@@ -60,7 +62,17 @@ class Issue:
 def prompt_para(issue: Issue) -> str:
     return (f"Resuelve el issue #{issue.numero} del repo {issue.repo}: {issue.titulo}\n\n{issue.cuerpo.strip()}\n\n"
             "Reglas: trabaja solo en esta carpeta, agrega o ajusta las pruebas del cambio y deja todas las pruebas en "
-            "verde. No hagas commit, push ni merge: Hermes se encarga y pide aprobación.")
+            "verde. No hagas commit, push ni merge: Hermes se encarga y pide aprobación.\n\n"
+            "Termina tu respuesta con una sección que empiece exactamente con «CÓMO PROBAR:» y, en máximo 5 pasos "
+            "cortos, diga cómo comprobar a mano que funciona (comandos y qué se debe ver).")
+
+
+def como_probar(salida: str) -> str:
+    """La sección CÓMO PROBAR: que el agente deja al final de su respuesta."""
+    i = (salida or "").rfind("CÓMO PROBAR:")
+    if i < 0:
+        return "• (el agente no dejó pasos; mira el PR)"
+    return (salida[i + len("CÓMO PROBAR:"):].strip() or "• (vacío)")[:800]
 
 
 @dataclasses.dataclass
@@ -305,23 +317,40 @@ class Cola:
             self.estado.guardar()
 
             resumen = stat.strip().splitlines()[-1] if code == 0 and stat.strip() else "sin resumen"
-            ok = await pedir_aprobacion(f"🙋 {etiqueta} listo y con pruebas en verde.\n«{issue.titulo}»\nRama: {rama}\nCambios: {resumen}\n"
-                                        f"{self._texto_revision(revision)}\n\n¿Lo subo a GitHub y abro el PR a {proyecto.rama_base}? (el merge lo haces tú)")
-            if not ok:
-                self._etiquetar(issue, ETQ_ESPERANDO, ETQ_RECHAZADO)
-                await notify(f"🗑️ {etiqueta}: no se subió. El trabajo quedó en {carpeta}")
-                return "rechazado"
+
+            # 4) Push de la rama y PR (una rama feature/* es reversible: no necesita permiso).
             try:
                 await asyncio.to_thread(self._cmd_ok, ["git", "-C", carpeta, "push", "-u", "origin", rama], 300)
             except Exception as e:
                 self.estado.pausar(f"no pude subir {etiqueta}: {e}")
                 await notify(f"⏸️ Cola en pausa: {self.estado.motivo}")
                 return "push falló"
-            self._etiquetar(issue, ETQ_ESPERANDO, ETQ_HECHO)
             enlace = await asyncio.to_thread(self._abrir_pr, issue, proyecto.rama_base, rama, revision)
             self._comentar(issue, f"Hermes subió la rama `{rama}` con pruebas en verde: {enlace}")
-            await notify(f"🚀 {etiqueta} subido. PR a {proyecto.rama_base}: {enlace}")
-            return "subido"
+
+            # 5) Johan prueba. Solo con su ✅ se hace el merge a la rama base (nunca a main).
+            como = como_probar(getattr(t, "salida", "") or "")
+            ok = await pedir_aprobacion(
+                f"🧪 {etiqueta} listo para que lo pruebes.\n«{issue.titulo}»\nPR: {enlace}\nCambios: {resumen}\n"
+                f"{self._texto_revision(revision)}\n\nCómo probarlo (en {carpeta}):\n{como}\n\n"
+                f"¿Funciona? Con ✅ hago el merge a {proyecto.rama_base}.")
+            if not ok:
+                self._etiquetar(issue, ETQ_ESPERANDO, ETQ_RECHAZADO)
+                self._comentar(issue, "Johan lo probó y no funciona todavía. El PR queda abierto.")
+                await notify(f"🔧 {etiqueta}: el PR queda abierto ({enlace}). Dime qué falla con /pedir {issue.proyecto} <qué falla en #{issue.numero}>")
+                return "no funciona"
+            if os.environ.get("HERMES_MERGE", "1") == "0":
+                self._etiquetar(issue, ETQ_ESPERANDO, ETQ_HECHO)
+                await notify(f"👍 {etiqueta}: aprobado. El merge lo haces tú: {enlace}")
+                return "aprobado"
+            code, _, err = await asyncio.to_thread(self._cmd, ["gh", "pr", "merge", rama, "--repo", issue.repo, "--squash", "--delete-branch"], 120)
+            if code != 0:
+                await notify(f"⚠️ {etiqueta}: no pude hacer el merge ({(err or '').strip()[:200]}). Hazlo tú: {enlace}")
+                return "merge falló"
+            self._etiquetar(issue, ETQ_ESPERANDO, ETQ_HECHO)
+            await asyncio.to_thread(self._cmd, ["git", "-C", proyecto.carpeta, "worktree", "remove", "--force", carpeta], 60)
+            await notify(f"✅ {etiqueta}: merge a {proyecto.rama_base} hecho y worktree borrado. 🎉")
+            return "integrado"
         finally:
             self.estado.actual = ""
 
