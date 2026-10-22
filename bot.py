@@ -13,6 +13,9 @@ from bot.handlers.chat import get_handlers as chat_handlers
 
 from telegram.ext import ApplicationBuilder
 
+# Falta configuración: salida 78 para que PM2 no lo reinicie en bucle (REGLAS_ECOSISTEMA regla 8, stop_exit_codes).
+SALIDA_CONFIG = 78
+
 
 def crear_post_init(allowed):
     """Al arrancar: vigía de PM2 (#7) y cola de issues (#9) en segundo plano. Avisan al HERMES_CHAT_ID o al primer chat permitido."""
@@ -37,17 +40,17 @@ def crear_post_init(allowed):
 def main():
     if not BOT_TOKEN:
         print("Configura HERMES_BOT_TOKEN en .env o variable de entorno.")
-        sys.exit(1)
+        sys.exit(SALIDA_CONFIG)
 
     try:
         allowed = parse_allowed(ALLOWED_CHAT_IDS_RAW)
     except ValueError as e:
         print(f"❌ {e}")
-        sys.exit(1)
+        sys.exit(SALIDA_CONFIG)
     if not allowed:
         # Falla cerrado: sin lista de chats permitidos, cualquiera podría darle órdenes al bot.
         print("❌ Configura HERMES_ALLOWED_CHAT_IDS en .env (tu chat id de Telegram). Sin eso el bot no arranca.")
-        sys.exit(1)
+        sys.exit(SALIDA_CONFIG)
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.post_init = crear_post_init(allowed)

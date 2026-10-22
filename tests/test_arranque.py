@@ -40,8 +40,9 @@ def test_sin_token_el_bot_no_arranca(monkeypatch, capsys):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     monkeypatch.setattr(mod, "BOT_TOKEN", "")
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as salida:
         mod.main()
+    assert salida.value.code == 78, "78 = PM2 no lo reinicia en bucle (stop_exit_codes)"
 
 
 class TestIA:
@@ -143,3 +144,17 @@ class TestNotifyPermission:
     def test_json_invalido_usa_permiso_por_defecto(self, monkeypatch):
         out = self._run(monkeypatch, None)
         assert out and "Necesita tu atencion" in out[0]
+
+
+def test_ecosystem_de_pm2_seguro():
+    import json, pathlib, subprocess
+    raiz = pathlib.Path(__file__).resolve().parents[1]
+    js = "const c=require(process.argv[1]);console.log(JSON.stringify(c.apps))"
+    try:
+        apps = json.loads(subprocess.run(["node", "-e", js, str(raiz / "ecosystem.config.js")], capture_output=True, text=True, check=True).stdout)
+    except FileNotFoundError:
+        import pytest
+        pytest.skip("node no está instalado")
+    app = apps[0]
+    assert app["name"] == "hermes" and app["script"] == "bot.py"
+    assert 78 in app["stop_exit_codes"] and app["max_restarts"] <= 10 and app["min_uptime"]
