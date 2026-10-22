@@ -37,9 +37,16 @@ Con `HERMES_COLA=1`, cada 10 minutos Hermes busca issues abiertos con la etiquet
 
 1. Crea un worktree en `~/.jarvis/worktrees/<proyecto>/issue-<n>` con la rama `feature/issue-<n>` desde la rama base.
    La carpeta del proyecto (donde corre producción) no se toca.
-2. El agente resuelve el issue ahí. Luego Hermes corre las pruebas del proyecto.
-3. Si pasan, hace un commit **local** y te pregunta por Telegram: 🚀 Subir / 🗑️ No subir.
-4. Solo con 🚀 hace `git push` de la rama y te manda el enlace para abrir el PR. El PR y el merge siempre los haces tú.
+   Si el proyecto tiene `preparar` (ej. `npm ci`), lo corre ahí primero.
+2. El agente resuelve el issue ahí. Luego Hermes corre las pruebas del proyecto. Si fallan, el agente tiene un intento
+   más con el error de las pruebas.
+3. Si pasan, hace un commit **local** y un revisor automático (`HERMES_REVISOR`) lee el diff contra las reglas del repo:
+   APROBADO o CAMBIOS. Si pide cambios, el agente los corrige una vez (si la corrección rompe las pruebas, se descarta).
+4. Te pregunta por Telegram, con el veredicto de la revisión: 🚀 Subir / 🗑️ No subir.
+5. Solo con 🚀 hace `git push` de la rama y abre el PR a la rama base (`gh pr create`). El merge siempre lo haces tú.
+
+Para usar tu plan de Claude en vez de pagar tokens, pon `HERMES_AGENT=claude` (Claude Code en modo `claude -p`).
+Los proyectos con `solo_cola: true` (saas-bot, cuya carpeta es producción) no aceptan `/run`: solo issues de la cola.
 
 Frenos: si las pruebas fallan la cola se pausa; también con 2 fallas seguidas del agente o al llegar a 5 issues en el
 día. La pausa sobrevive reinicios: se sigue con `/reanudar`.

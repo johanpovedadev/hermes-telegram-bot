@@ -25,7 +25,9 @@ def test_el_projects_yaml_del_repo_es_valido(tmp_path):
     nombres = {p.nombre for p in reg.proyectos}
     assert {"saas-bot", "lion-platform-api", "agentvents", "hermes"} <= nombres
     assert all(p.pruebas for p in reg.proyectos)
-    assert not reg.obtener("saas-bot").habilitado, "producción no se toca hasta que la cola use worktrees"
+    saas = reg.obtener("saas-bot")
+    assert saas.solo_cola and saas.preparar, "producción solo por la cola, en worktree con dependencias instaladas"
+    assert reg.para_trabajar("saas-bot")[0] is None, "/run nunca corre en la carpeta de producción"
     assert not reg.obtener("hermes").habilitado, "Hermes no se modifica a sí mismo mientras corre"
 
 
@@ -127,3 +129,15 @@ async def test_run_rechaza_deshabilitado(mock_update, mock_context, monkeypatch,
 def test_nombre_que_yaml_lee_como_si_no(tmp_path):
     reg = projects.cargar(_yaml(tmp_path, "proyectos:\n  - {nombre: no, carpeta: x, pruebas: t}\n"), str(tmp_path))
     assert not reg.valido and "entre comillas" in reg.errores[0]
+
+
+def test_solo_cola_bloquea_run(tmp_path):
+    (tmp_path / "prod").mkdir()
+    f = tmp_path / "p.yaml"
+    f.write_text("proyectos:\n  - nombre: saas-bot\n    repo: a/b\n    carpeta: prod\n    pruebas: npm test\n"
+                 "    habilitado: true\n    solo_cola: true\n    preparar: npm ci\n")
+    reg = projects.cargar(str(f), str(tmp_path))
+    p = reg.obtener("saas-bot")
+    assert p.solo_cola and p.preparar == "npm ci"
+    info, motivo = reg.para_trabajar("saas-bot")
+    assert info is None and "solo para la cola" in motivo

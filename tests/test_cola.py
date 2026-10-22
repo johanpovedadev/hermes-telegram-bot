@@ -41,12 +41,19 @@ def mundo(tmp_path, monkeypatch):
             self.issues = {("johan/demo", 7): {"title": "Agregar saludo", "body": "Que diga hola", "labels": {"hermes:listo"}}}
             self.llamadas = []
             self.comentarios = []
+            self.prs = []
+            self.pr_falla = False
 
         def __call__(self, argv, timeout):
             if argv[0] != "gh":
                 return run_cmd(argv, timeout)
             self.llamadas.append(argv)
             repo = argv[argv.index("--repo") + 1]
+            if argv[1:3] == ["pr", "create"]:
+                self.prs.append(argv)
+                if self.pr_falla:
+                    return 1, "", "GraphQL: no permitido"
+                return 0, f"https://github.com/{repo}/pull/{len(self.prs)}\n", ""
             if argv[1:3] == ["issue", "list"]:
                 assert repo != "johan/prod", "nunca mira proyectos deshabilitados"
                 lista = [{"number": n, "title": d["title"], "body": d["body"]} for (r, n), d in self.issues.items()
@@ -69,14 +76,28 @@ def mundo(tmp_path, monkeypatch):
         def __init__(self):
             self.codigo, self.pruebas, self.escribe = 0, 0, True
             self.cwds = []
+            self.prompts = []
+            self.veredictos = ["APROBADO\n- todo bien"]
+            self.revisiones = []
+            self.pruebas_seq = None  # lista de códigos de prueba por intento
+            self.nuevo_archivo = False  # cada llamada crea además un archivo nuevo
 
         async def __call__(self, argv, cwd, timeout, shell=False):
             if shell:
-                return self.pruebas, "", "AssertionError: 1 != 2" if self.pruebas else "", False
+                code = self.pruebas_seq.pop(0) if self.pruebas_seq else self.pruebas
+                return code, "", "AssertionError: 1 != 2" if code else "", False
+            if argv[-1].startswith("REVISOR"):
+                self.revisiones.append(argv[-1])
+                v = self.veredictos.pop(0) if len(self.veredictos) > 1 else self.veredictos[0]
+                return (1, "", "caído", False) if v == "ERROR" else (0, v, "", False)
             self.cwds.append(cwd)
+            self.prompts.append(argv[-1])
             if self.escribe:
-                with open(os.path.join(cwd, "saludo.py"), "w") as f:
+                with open(os.path.join(cwd, "saludo.py"), "a") as f:
                     f.write("print('hola')\n")
+                if self.nuevo_archivo:
+                    with open(os.path.join(cwd, f"paso{len(self.prompts)}.py"), "w") as f:
+                        f.write("x = 1\n")
             return self.codigo, "listo", "", False
 
     gh, agente = GH(), Agente()
@@ -113,15 +134,19 @@ def test_camino_feliz_worktree_aprobacion_y_push(mundo):
     r = asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
     assert r == "subido"
     wt = m["tmp"] / "wt" / "demo" / "issue-7"
-    assert m["agente"].cwds == [str(wt)], "el agente trabaja en el worktree, nunca en la carpeta del proyecto"
+    assert m["agente"].cwds and set(m["agente"].cwds) == {str(wt)}, "el agente trabaja en el worktree, nunca en la carpeta del proyecto"
     assert not (m["carpeta"] / "saludo.py").exists()
     assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=m["carpeta"]).strip() == "develop"
     assert "feature/issue-7" in ramas_remotas(m)
     assert git("log", "-1", "--format=%s", "feature/issue-7", cwd=m["origen"]).strip() == "feat: Agregar saludo (#7)"
     assert "develop" in ramas_remotas(m) and git("log", "--oneline", "develop", cwd=m["origen"]).count("\n") == 1, "develop no se toca"
     assert labels(m) == {"hermes:hecho"}
-    assert "¿Lo subo a GitHub?" in preguntas[0] and "1 file changed" in preguntas[0]
-    assert any("compare/develop...feature/issue-7" in a for a in m["avisos"])
+    assert "¿Lo subo a GitHub" in preguntas[0] and "1 file changed" in preguntas[0]
+    assert "✅ Revisión: APROBADO" in preguntas[0]
+    pr = m["gh"].prs[0]
+    assert pr[pr.index("--base") + 1] == "develop" and pr[pr.index("--head") + 1] == "feature/issue-7"
+    assert "Closes #7" in pr[pr.index("--body") + 1]
+    assert any("https://github.com/johan/demo/pull/1" in a for a in m["avisos"])
     assert m["cola"].estado.hechos_hoy == 1
 
 
@@ -136,7 +161,7 @@ def test_sin_aprobacion_no_hay_push(mundo):
 
 def test_pruebas_que_fallan_pausan_la_cola_sin_preguntar_ni_subir(mundo):
     m = mundo
-    m["agente"].pruebas = 1
+    m["agente"].pruebas = 1  # falla también en el reintento
     preguntas = []
     assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "pruebas fallaron"
     assert preguntas == [] and "feature/issue-7" not in ramas_remotas(m)
@@ -269,3 +294,100 @@ def test_botones_de_aprobacion():
         assert await tarea is False
 
     asyncio.run(caso())
+
+
+def test_reintento_con_el_error_de_las_pruebas(mundo):
+    m = mundo
+    m["agente"].pruebas_seq = [1, 0]
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert len(m["agente"].prompts) == 2 and "AssertionError: 1 != 2" in m["agente"].prompts[1]
+    assert any(a.startswith("🔁") for a in m["avisos"])
+
+
+def test_sin_reintentos_pausa_al_primer_fallo(mundo):
+    m = mundo
+    m["cola"].reintentos = 0
+    m["agente"].pruebas_seq = [1, 0]
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "pruebas fallaron"
+    assert len(m["agente"].prompts) == 1
+
+
+def test_revisor_pide_cambios_y_se_corrigen(mundo):
+    m = mundo
+    m["agente"].veredictos = ["CAMBIOS\n- falta la prueba del saludo", "APROBADO\n- listo"]
+    preguntas = []
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "subido"
+    assert len(m["agente"].revisiones) == 2 and "saludo.py" in m["agente"].revisiones[0], "el revisor ve el diff"
+    assert "falta la prueba del saludo" in m["agente"].prompts[1]
+    assert "✅ Revisión: APROBADO" in preguntas[0]
+    log = git("log", "--format=%s", "origin/develop..feature/issue-7", cwd=m["tmp"] / "wt" / "demo" / "issue-7")
+    assert log.splitlines() == ["fix: ajustes de la revisión (#7)", "feat: Agregar saludo (#7)"]
+
+
+def test_revisor_insiste_igual_se_pregunta_con_la_advertencia(mundo):
+    m = mundo
+    m["agente"].veredictos = ["CAMBIOS\n- usa un puerto fijo repetido"]
+    preguntas = []
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(False, preguntas)))
+    assert "⚠️ Revisión: pide CAMBIOS" in preguntas[0] and "puerto fijo" in preguntas[0]
+    assert len(m["agente"].revisiones) == 2, "una sola ronda de corrección, no un bucle"
+
+
+def test_correccion_que_rompe_pruebas_se_descarta(mundo):
+    m = mundo
+    m["agente"].veredictos = ["CAMBIOS\n- renombra"]
+    m["agente"].pruebas_seq = [0, 1]
+    m["agente"].nuevo_archivo = True
+    preguntas = []
+    asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas)))
+    wt = m["tmp"] / "wt" / "demo" / "issue-7"
+    assert git("status", "--porcelain", cwd=wt).strip() == "", "no quedan cambios rotos sin commit"
+    assert git("log", "--format=%s", "origin/develop..HEAD", cwd=wt).splitlines() == ["feat: Agregar saludo (#7)"]
+    assert "la corrección falló" in preguntas[0]
+
+
+def test_revisor_caido_no_frena(mundo):
+    m = mundo
+    m["agente"].veredictos = ["ERROR"]
+    preguntas = []
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True, preguntas))) == "subido"
+    assert "⚪ Revisión: sin veredicto" in preguntas[0] and "no pudo correr" in preguntas[0]
+
+
+def test_revisor_apagado(mundo, monkeypatch):
+    m = mundo
+    monkeypatch.setenv("HERMES_REVISOR", "0")
+    c = cl.Cola(m["cola"].manager, m["cola"].registro_fn, run=m["gh"], estado=m["cola"].estado,
+                hoy=m["cola"].hoy, worktrees_dir=m["cola"].worktrees_dir)
+    preguntas = []
+    asyncio.run(c.procesar_uno(m["notify"], si(True, preguntas)))
+    assert m["agente"].revisiones == [] and "Revisión automática: apagada" in preguntas[0]
+
+
+def test_si_gh_no_abre_el_pr_queda_el_enlace(mundo):
+    m = mundo
+    m["gh"].pr_falla = True
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert any("compare/develop...feature/issue-7?expand=1" in a for a in m["avisos"])
+
+
+@pytest.mark.parametrize("salida,esperado", [
+    ("APROBADO\n- ok", True), ("**APROBADO**", True), ("CAMBIOS:\n- x", False), ("no sé", None), ("", None)])
+def test_interpretar_revision(salida, esperado):
+    assert cl.interpretar_revision(salida).aprobado is esperado
+
+
+def test_preparar_corre_en_el_worktree_antes_del_agente(mundo):
+    m = mundo
+    p = m["cola"].registro_fn().obtener("demo")
+    p.preparar = "python -c \"open('preparado.txt','w').write('ok')\""
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "subido"
+    assert (m["tmp"] / "wt" / "demo" / "issue-7" / "preparado.txt").exists()
+    assert not (m["carpeta"] / "preparado.txt").exists()
+
+
+def test_preparar_que_falla_es_falla(mundo):
+    m = mundo
+    m["cola"].registro_fn().obtener("demo").preparar = "python -c \"import sys; sys.exit('sin red')\""
+    assert asyncio.run(m["cola"].procesar_uno(m["notify"], si(True))) == "fallo"
+    assert m["agente"].prompts == [] and any("sin red" in a for a in m["avisos"])

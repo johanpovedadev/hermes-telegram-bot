@@ -1,6 +1,7 @@
 # Proyectos que Hermes conoce (issue #8). Sin secretos: este archivo va versionado.
 # carpeta: relativa a HERMES_DOCUMENTS_PATH (~/Documents) o absoluta.
-# habilitado: false = Hermes no trabaja en él (ni /run ni la cola). Los puertos salen de saas-bot/config/ports.json.
+# habilitado: false = Hermes no trabaja en él (ni /run ni la cola). solo_cola: true = solo la cola, en worktree.
+# preparar: comando que se corre en el worktree recién creado (instalar dependencias). Los puertos salen de saas-bot/config/ports.json.
 proyectos:
   - nombre: saas-bot
     repo: johanpovedadev/saas-bot
@@ -9,8 +10,10 @@ proyectos:
     pruebas: cd bot-wasap && node scripts/run-tests.js
     pm2: [django-heladeria, bot-heladeria, django-pescaderia, bot-pescaderia, django-mascotas, bot-mascotas, bot-finance, bot-finance-telegram, bot-pilates, bot-pilates-clientas, admin-panel]
     puertos: [8000, 8001, 8002, 8096, 8097, 8100, 8101, 8102, 8103, 4000]
-    habilitado: false
-    nota: los bots de producción corren desde esta carpeta; se habilita cuando la cola trabaje en worktrees (issue #9)
+    habilitado: true
+    solo_cola: true
+    preparar: cd bot-wasap && npm ci
+    nota: los bots de producción corren desde esta carpeta; Hermes solo trabaja aquí con la cola, en un worktree aparte
 
   - nombre: lion-platform-api
     repo: johanpovedadev/lion-platform-api
@@ -34,6 +37,7 @@ proyectos:
     carpeta: AGentVents
     rama_base: develop
     pruebas: npm test
+    preparar: npm ci
     puertos: [3100, 8300]
     habilitado: true
 

@@ -26,6 +26,8 @@ class Proyecto:
     puertos: List[int] = field(default_factory=list)
     habilitado: bool = False
     nota: str = ""
+    solo_cola: bool = False  # True: solo la cola (worktree aparte); /run no, porque correría en la carpeta de producción
+    preparar: str = ""  # comando que deja listo un worktree recién creado (ej. npm ci) antes del agente
 
 
 def ruta_por_defecto() -> str:
@@ -61,6 +63,9 @@ class Registro:
             return None, f"❌ `{nombre}` no está en projects.yaml. Habilitados: {disponibles}"
         if not p.habilitado:
             return None, f"⛔ `{p.nombre}` está deshabilitado para Hermes en projects.yaml{f' ({p.nota})' if p.nota else ''}."
+        if p.solo_cola:
+            return None, (f"⛔ `{p.nombre}` es solo para la cola: su carpeta es producción. "
+                          "Crea un issue con la etiqueta hermes:listo y Hermes lo trabaja en un worktree aparte.")
         if not os.path.isdir(p.carpeta):
             return None, f"❌ La carpeta de `{p.nombre}` no existe: {p.carpeta}"
         return p, None
@@ -126,5 +131,6 @@ def cargar(ruta: Optional[str] = None, documentos: Optional[str] = None) -> Regi
             nombre=nombre, repo=str(c.get("repo") or "").strip(), carpeta=carpeta, pruebas=pruebas,
             rama_base=str(c.get("rama_base") or "develop").strip(), pm2=[str(x) for x in (c.get("pm2") or [])],
             puertos=puertos, habilitado=habilitado, nota=str(c.get("nota") or "").strip(),
+            solo_cola=bool(c.get("solo_cola", False)), preparar=str(c.get("preparar") or "").strip(),
         ))
     return Registro(proyectos, errores, avisos)
