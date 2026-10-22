@@ -30,7 +30,7 @@ from datetime import date
 from typing import Awaitable, Callable, List, Optional, Tuple
 
 from bot.core.estado import run_cmd as _run_cmd
-from bot.core.jobs import AGENTES, agente_configurado
+from bot.core.jobs import AGENTES, REVISORES, agente_configurado
 
 ETQ_LISTO = "hermes:listo"
 ETQ_TRABAJANDO = "hermes:trabajando"
@@ -117,7 +117,7 @@ def revisor_por_agente(runner, agente: Optional[str] = None):
             nombre = agente_configurado()
         prompt = PROMPT_REVISOR.format(numero=issue.numero, titulo=issue.titulo, cuerpo=issue.cuerpo.strip()[:3000],
                                        diff=diff[:30000])
-        code, out, err, vencido = await runner(AGENTES[nombre](prompt), carpeta, _env_int("HERMES_REVISOR_TIMEOUT_MIN", 15) * 60)
+        code, out, err, vencido = await runner(REVISORES[nombre](prompt), carpeta, _env_int("HERMES_REVISOR_TIMEOUT_MIN", 15) * 60)
         if vencido or code != 0:
             return Revision(None, f"el revisor no pudo correr ({'tiempo vencido' if vencido else f'código {code}'})")
         return interpretar_revision(out)
