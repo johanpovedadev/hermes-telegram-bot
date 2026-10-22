@@ -1,0 +1,58 @@
+# Proyectos que Hermes conoce (issue #8). Sin secretos: este archivo va versionado.
+# carpeta: relativa a HERMES_DOCUMENTS_PATH (~/Documents) o absoluta.
+# habilitado: false = Hermes no trabaja en él (ni /run ni la cola). solo_cola: true = solo la cola, en worktree.
+# preparar: comando que se corre en el worktree recién creado (instalar dependencias). Los puertos salen de saas-bot/config/ports.json.
+proyectos:
+  - nombre: saas-bot
+    repo: johanpovedadev/saas-bot
+    carpeta: empanadas
+    rama_base: develop
+    pruebas: cd bot-wasap && node scripts/run-tests.js
+    pm2: [django-heladeria, bot-heladeria, django-pescaderia, bot-pescaderia, django-mascotas, bot-mascotas, bot-finance, bot-finance-telegram, bot-pilates, bot-pilates-clientas, admin-panel]
+    puertos: [8000, 8001, 8002, 8096, 8097, 8100, 8101, 8102, 8103, 4000]
+    habilitado: true
+    solo_cola: true
+    preparar: cd bot-wasap && npm ci
+    nota: los bots de producción corren desde esta carpeta; Hermes solo trabaja aquí con la cola, en un worktree aparte
+
+  - nombre: lion-platform-api
+    repo: johanpovedadev/lion-platform-api
+    carpeta: lion-platform-api
+    rama_base: develop
+    pruebas: mvnw.cmd -q test
+    puertos: [8080, 8081]
+    habilitado: true
+
+  - nombre: lion-platform-web
+    repo: johanpovedadev/lion-platform-web
+    carpeta: lion-platform-web
+    rama_base: develop
+    pruebas: npm run lint && npm run build
+    puertos: [5173]
+    habilitado: false
+    nota: confirmar la carpeta en el PC
+
+  - nombre: agentvents
+    repo: johanpovedadev/AGentVents
+    carpeta: AGentVents
+    rama_base: develop
+    pruebas: npm test
+    preparar: npm ci
+    puertos: [3100, 8300]
+    habilitado: true
+
+  - nombre: lioncore
+    repo: johanpovedadev/LionCore
+    carpeta: LionCore
+    rama_base: develop
+    pruebas: npm test
+    habilitado: false
+    nota: confirmar la carpeta y el comando de pruebas
+
+  - nombre: hermes
+    repo: johanpovedadev/hermes-telegram-bot
+    carpeta: LionTelegram
+    rama_base: develop
+    pruebas: python -m pytest -q
+    habilitado: false
+    nota: Hermes no se modifica a sí mismo mientras corre; se trabaja en rama aparte y se reinicia con aprobación

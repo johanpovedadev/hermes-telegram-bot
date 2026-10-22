@@ -48,8 +48,10 @@ class TestRetryPolicy:
         assert policy.should_retry(ErrorType.TIMEOUT, 1) == True
         assert policy.should_retry(ErrorType.TIMEOUT, 2) == False
 
-    def test_retry_delay_exponential_backoff(self, policy):
-        """Test: delay con exponential backoff."""
+    def test_retry_delay_exponential_backoff(self, policy, monkeypatch):
+        """Test: delay con exponential backoff. El jitter (0.5x-1.5x) se fija en 1x: si no, a veces delay1 < delay0."""
+        import random
+        monkeypatch.setattr(random, "random", lambda: 0.5)
         delay0 = policy.get_retry_delay(ErrorType.NETWORK, 0)
         delay1 = policy.get_retry_delay(ErrorType.NETWORK, 1)
 
