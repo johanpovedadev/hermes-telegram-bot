@@ -23,7 +23,19 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 Notify = Callable[[str], Awaitable[None]]
 
+# En modo `claude -p` no hay nadie para aprobar permisos: sin estas banderas el agente no puede editar ni correr pruebas.
+# Puede editar y usar la terminal dentro del worktree, pero nunca subir, hacer merge ni borrar ramas: eso es de Hermes.
+CLAUDE_PROHIBIDO = ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git reset --hard:*)", "Bash(git branch -D:*)",
+                    "Bash(gh pr merge:*)", "Bash(rm -rf:*)", "Bash(pm2:*)"]
+
 AGENTES = {
+    "opencode": lambda prompt: ["opencode", "run", prompt],
+    "claude": lambda prompt: ["claude", "-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Bash",
+                              "--disallowedTools", *CLAUDE_PROHIBIDO],
+}
+
+# El revisor solo lee el diff que va en el prompt: sin permisos de edición ni de terminal.
+REVISORES = {
     "opencode": lambda prompt: ["opencode", "run", prompt],
     "claude": lambda prompt: ["claude", "-p", prompt],
 }

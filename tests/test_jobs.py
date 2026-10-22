@@ -125,7 +125,7 @@ def test_reinicio_marca_interrumpidos(tmp_path):
 
 def test_agente_configurable(monkeypatch):
     monkeypatch.setenv("HERMES_AGENT", "claude")
-    assert jobs.agente_configurado() == "claude" and jobs.AGENTES["claude"]("x") == ["claude", "-p", "x"]
+    assert jobs.agente_configurado() == "claude" and jobs.AGENTES["claude"]("x")[:3] == ["claude", "-p", "x"]
     monkeypatch.setenv("HERMES_AGENT", "otro")
     assert jobs.agente_configurado() == "opencode"
     monkeypatch.delenv("HERMES_AGENT_TIMEOUT_MIN", raising=False)
@@ -192,3 +192,13 @@ def test_avance_git(tmp_path):
     (tmp_path / "nuevo.py").write_text("x")
     assert "1 archivo(s) cambiado(s): nuevo.py" in avance_git(str(tmp_path))
     assert avance_git(str(tmp_path / "no-existe")) == ""
+
+
+
+def test_claude_headless_puede_editar_pero_no_subir():
+    from bot.core import jobs
+    argv = jobs.AGENTES["claude"]("haz X")
+    assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+    prohibido = argv[argv.index("--disallowedTools") + 1:]
+    assert "Bash(git push:*)" in prohibido and "Bash(gh pr merge:*)" in prohibido and "Bash(pm2:*)" in prohibido
+    assert jobs.REVISORES["claude"]("revisa") == ["claude", "-p", "revisa"], "el revisor no recibe permisos"
