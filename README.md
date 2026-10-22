@@ -27,6 +27,7 @@ python bot.py
 | `/run [proyecto] [tarea]` | Lanza el agente en segundo plano (solo proyectos habilitados en `projects.yaml`) |
 | `/trabajos` | Trabajos corriendo y los últimos 10 |
 | `/estado` | PM2, bots, puertos, CI y trabajos (datos reales, sin IA) |
+| `/pedir [proyecto] [qué quieres]` | Le encargas algo: crea el issue con `hermes:listo` y la cola lo trabaja |
 | `/cola` | Issues con `hermes:listo` y estado de la cola |
 | `/pausar` · `/reanudar` | Frenar o seguir la cola (`/reanudar` pone las fallas en 0) |
 
@@ -42,8 +43,12 @@ Con `HERMES_COLA=1`, cada 10 minutos Hermes busca issues abiertos con la etiquet
    más con el error de las pruebas.
 3. Si pasan, hace un commit **local** y un revisor automático (`HERMES_REVISOR`) lee el diff contra las reglas del repo:
    APROBADO o CAMBIOS. Si pide cambios, el agente los corrige una vez (si la corrección rompe las pruebas, se descarta).
-4. Te pregunta por Telegram, con el veredicto de la revisión: 🚀 Subir / 🗑️ No subir.
-5. Solo con 🚀 hace `git push` de la rama y abre el PR a la rama base (`gh pr create`). El merge siempre lo haces tú.
+4. Sube la rama y abre el PR a la rama base (`gh pr create`).
+5. Te pide que lo pruebes, con los pasos de "CÓMO PROBAR" que dejó el agente: ✅ Funciona / ❌ No funciona.
+6. Con ✅ hace el merge del PR a `develop` (squash) y borra el worktree. Con ❌ el PR queda abierto: dile qué falla con
+   `/pedir`. Pasar `develop` a `main` (producción) siempre lo haces tú. Ver la sección 0 de `REGLAS_ECOSISTEMA.md`.
+
+Mientras el agente trabaja, cada 10 minutos te llega un ⏳ con los archivos que lleva cambiados.
 
 Para usar tu plan de Claude en vez de pagar tokens, pon `HERMES_AGENT=claude` (Claude Code en modo `claude -p`).
 Los proyectos con `solo_cola: true` (saas-bot, cuya carpeta es producción) no aceptan `/run`: solo issues de la cola.
