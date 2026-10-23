@@ -157,4 +157,19 @@ def test_ecosystem_de_pm2_seguro():
         pytest.skip("node no está instalado")
     app = apps[0]
     assert app["name"] == "hermes" and app["script"] == "bot.py"
+    assert app["env"]["PYTHONUTF8"] == "1", "sin esto los emojis tumban a Hermes en Windows"
     assert 78 in app["stop_exit_codes"] and app["max_restarts"] <= 10 and app["min_uptime"]
+
+
+def test_consola_cp1252_no_tumba_el_bot(monkeypatch):
+    import importlib.util, io, pathlib, sys
+    spec = importlib.util.spec_from_file_location("bot_main3", pathlib.Path(__file__).resolve().parents[1] / "bot.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    crudo = io.BytesIO()
+    consola = io.TextIOWrapper(crudo, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", consola)
+    mod._consola_utf8()
+    print("\u26a1 Jarvis León iniciado")
+    consola.flush()
+    assert "⚡".encode("utf-8") in crudo.getvalue()

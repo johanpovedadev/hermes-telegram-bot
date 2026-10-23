@@ -37,7 +37,17 @@ def crear_post_init(allowed):
     return post_init
 
 
+def _consola_utf8():
+    """En Windows bajo PM2 la salida es cp1252 y un emoji en print() tumba el bot. Nunca falla."""
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            flujo.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main():
+    _consola_utf8()
     if not BOT_TOKEN:
         print("Configura HERMES_BOT_TOKEN en .env o variable de entorno.")
         sys.exit(SALIDA_CONFIG)
