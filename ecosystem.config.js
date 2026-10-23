@@ -15,6 +15,8 @@ module.exports = {
       stop_exit_codes: [78], // falta configuración: no reiniciar en bucle
       max_memory_restart: '400M',
       time: true,
+      // En Windows, PM2 le da a Python una consola cp1252: los emojis de print() lo tumbaban (23 oct 2026).
+      env: { PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
     },
   ],
 };
