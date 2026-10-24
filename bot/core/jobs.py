@@ -121,6 +121,20 @@ class JobStore:
         return [Trabajo(*r) for r in rows]
 
 
+SECRETOS = ("TOKEN", "SECRET", "API_KEY", "APIKEY", "PASSWORD", "PASSWD", "PRIVATE_KEY")
+
+
+def entorno_agente() -> Dict[str, str]:
+    """Entorno para el agente y las pruebas: el de Hermes SIN sus secretos, y con HERMES_JOB=1.
+
+    Origen (23 oct 2026): el agente y las pruebas heredaban HERMES_BOT_TOKEN del .env de Hermes; con eso, una prueba
+    de otro proyecto puede mandar mensajes reales por el bot. HERMES_JOB=1 además silencia los hooks de notify.py.
+    """
+    env = {k: v for k, v in os.environ.items() if not any(p in k.upper() for p in SECRETOS)}
+    env["HERMES_JOB"] = "1"
+    return env
+
+
 def _matar_arbol(pid: int) -> None:
     """Mata el proceso y todos sus hijos (Windows: taskkill /T; Linux/Mac: el grupo de procesos)."""
     try:
@@ -172,10 +186,10 @@ class JobManager:
         # Grupo de procesos propio: al vencerse se mata el árbol completo (el agente lanza node, npm, pruebas...).
         extra = {} if os.name == "nt" else {"start_new_session": True}
         if shell:
-            proc = await asyncio.create_subprocess_shell(argv_o_shell, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
+            proc = await asyncio.create_subprocess_shell(argv_o_shell, cwd=cwd, env=entorno_agente(), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
         else:
             exe = shutil.which(argv_o_shell[0]) or argv_o_shell[0]  # en Windows, opencode/claude son .cmd
-            proc = await asyncio.create_subprocess_exec(exe, *argv_o_shell[1:], cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
+            proc = await asyncio.create_subprocess_exec(exe, *argv_o_shell[1:], cwd=cwd, env=entorno_agente(), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace"), False

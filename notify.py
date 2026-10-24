@@ -31,7 +31,14 @@ async def notificar(mensaje: str):
     await bot.send_message(chat_id=CHAT_ID, text=mensaje)
 
 
+def es_trabajo_de_hermes() -> bool:
+    """Los claude -p que lanza Hermes ya avisan por la cola; sus hooks no deben duplicar el aviso."""
+    return os.environ.get("HERMES_JOB") == "1"
+
+
 if __name__ == "__main__":
+    if es_trabajo_de_hermes():
+        sys.exit(0)
     msg = sys.argv[1] if len(sys.argv) > 1 else "Tarea completada"
     log_debug(f"hook=notify token_ok={bool(BOT_TOKEN)} chat_id={CHAT_ID} msg={msg}")
     try:
