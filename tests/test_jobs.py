@@ -202,3 +202,12 @@ def test_claude_headless_puede_editar_pero_no_subir():
     prohibido = argv[argv.index("--disallowedTools") + 1:]
     assert "Bash(git push:*)" in prohibido and "Bash(gh pr merge:*)" in prohibido and "Bash(pm2:*)" in prohibido
     assert jobs.REVISORES["claude"]("revisa") == ["claude", "-p", "revisa"], "el revisor no recibe permisos"
+
+
+
+def test_el_agente_no_hereda_stdin(tmp_path):
+    import asyncio as aio, sys
+    from bot.core.jobs import JobManager, JobStore
+    m = JobManager(store=JobStore(str(tmp_path / "j.db")))
+    codigo, out, err, venc = aio.run(m._run_proceso([sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"], str(tmp_path), 10))
+    assert codigo == 0 and out.strip() == "''" and not venc, "stdin debe llegar vacío (DEVNULL), no abierto"

@@ -167,14 +167,15 @@ class JobManager:
         return dict(self._locks)
 
     async def _run_proceso(self, argv_o_shell, cwd: str, timeout: float, shell: bool = False):
-        """Ejecuta y devuelve (codigo, stdout, stderr, vencido). Mata el proceso si se vence."""
+        """Ejecuta y devuelve (codigo, stdout, stderr, vencido). Mata el proceso si se vence.
+        stdin vacío: `claude -p` espera datos por stdin si lo hereda abierto (pasó en PM2 el 23 oct 2026)."""
         # Grupo de procesos propio: al vencerse se mata el árbol completo (el agente lanza node, npm, pruebas...).
         extra = {} if os.name == "nt" else {"start_new_session": True}
         if shell:
-            proc = await asyncio.create_subprocess_shell(argv_o_shell, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
+            proc = await asyncio.create_subprocess_shell(argv_o_shell, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
         else:
             exe = shutil.which(argv_o_shell[0]) or argv_o_shell[0]  # en Windows, opencode/claude son .cmd
-            proc = await asyncio.create_subprocess_exec(exe, *argv_o_shell[1:], cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
+            proc = await asyncio.create_subprocess_exec(exe, *argv_o_shell[1:], cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **extra)
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace"), False
