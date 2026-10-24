@@ -4,7 +4,7 @@ import json
 import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from notify import notificar, log_debug
+from notify import notificar, log_debug, es_trabajo_de_hermes
 
 EMOJIS = {
     "permission_prompt": "🔐 Permiso requerido",
@@ -14,6 +14,8 @@ EMOJIS = {
 
 
 def main():
+    if es_trabajo_de_hermes():
+        return
     try:
         data = json.load(sys.stdin)
     except Exception:

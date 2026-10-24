@@ -211,3 +211,28 @@ def test_el_agente_no_hereda_stdin(tmp_path):
     m = JobManager(store=JobStore(str(tmp_path / "j.db")))
     codigo, out, err, venc = aio.run(m._run_proceso([sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"], str(tmp_path), 10))
     assert codigo == 0 and out.strip() == "''" and not venc, "stdin debe llegar vacío (DEVNULL), no abierto"
+
+
+
+def test_el_agente_no_recibe_los_secretos_de_hermes(tmp_path, monkeypatch):
+    import asyncio as aio, json, sys
+    from bot.core.jobs import JobManager, JobStore
+    monkeypatch.setenv("HERMES_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    monkeypatch.setenv("META_APP_SECRET", "s")
+    monkeypatch.setenv("HERMES_CHAT_ID", "5534032418")
+    m = JobManager(store=JobStore(str(tmp_path / "j.db")))
+    codigo, out, err, venc = aio.run(m._run_proceso(
+        [sys.executable, "-c", "import os, json; print(json.dumps(dict(os.environ)))"], str(tmp_path), 10))
+    env = json.loads(out)
+    assert codigo == 0
+    assert "HERMES_BOT_TOKEN" not in env and "DEEPSEEK_API_KEY" not in env and "META_APP_SECRET" not in env
+    assert env["HERMES_JOB"] == "1" and env["HERMES_CHAT_ID"] == "5534032418" and "PATH" in env
+
+
+def test_los_hooks_de_notify_callan_en_trabajos_de_hermes(monkeypatch):
+    import subprocess, sys, pathlib, os
+    raiz = pathlib.Path(__file__).resolve().parents[1]
+    env = dict(os.environ, HERMES_JOB="1", HERMES_BOT_TOKEN="")
+    r = subprocess.run([sys.executable, str(raiz / "notify.py"), "hola"], env=env, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and r.stdout == "", "no debe intentar enviar nada"
