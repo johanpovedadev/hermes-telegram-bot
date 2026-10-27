@@ -61,8 +61,11 @@ class Issue:
 
 def prompt_para(issue: Issue) -> str:
     return (f"Resuelve el issue #{issue.numero} del repo {issue.repo}: {issue.titulo}\n\n{issue.cuerpo.strip()}\n\n"
-            "Reglas: trabaja solo en esta carpeta, agrega o ajusta las pruebas del cambio y deja todas las pruebas en "
-            "verde. No hagas commit, push ni merge: Hermes se encarga y pide aprobación.\n\n"
+            "Reglas:\n"
+            "1. Empieza por el cambio: lee solo los archivos que el issue nombra y modifícalos primero.\n"
+            "2. Agrega o ajusta la prueba del cambio y corre SOLO esa prueba y las del archivo que tocaste "
+            "(ej. `node test_x.js` o `pytest tests/test_x.py`). NO corras la suite completa: Hermes la corre al final.\n"
+            "3. Trabaja solo en esta carpeta. No hagas commit, push ni merge: Hermes se encarga y pide aprobación.\n\n"
             "Termina tu respuesta con una sección que empiece exactamente con «CÓMO PROBAR:» y, en máximo 5 pasos "
             "cortos, diga cómo comprobar a mano que funciona (comandos y qué se debe ver).")
 
