@@ -236,3 +236,27 @@ def test_los_hooks_de_notify_callan_en_trabajos_de_hermes(monkeypatch):
     env = dict(os.environ, HERMES_JOB="1", HERMES_BOT_TOKEN="")
     r = subprocess.run([sys.executable, str(raiz / "notify.py"), "hola"], env=env, capture_output=True, text=True, timeout=30)
     assert r.returncode == 0 and r.stdout == "", "no debe intentar enviar nada"
+
+
+
+def test_opencode_headless_puede_editar_pero_no_subir(monkeypatch):
+    import json
+    from bot.core import jobs
+    monkeypatch.delenv("HERMES_OPENCODE_MODEL", raising=False)
+    assert jobs.AGENTES["opencode"]("haz X") == ["opencode", "run", "--auto", "haz X"]
+    monkeypatch.setenv("HERMES_OPENCODE_MODEL", "deepseek/deepseek-chat")
+    assert jobs.AGENTES["opencode"]("haz X") == ["opencode", "run", "--auto", "-m", "deepseek/deepseek-chat", "haz X"]
+    assert jobs.REVISORES["opencode"]("revisa")[:4] == ["opencode", "run", "--agent", "plan"], "el revisor es de solo lectura"
+    permisos = json.loads(jobs.entorno_agente()["OPENCODE_CONFIG_CONTENT"])["permission"]["bash"]
+    for prohibido in ("git push*", "git merge*", "gh pr merge*", "pm2*", "rm -rf*"):
+        assert permisos[prohibido] == "deny", prohibido
+
+
+def test_claves_que_el_agente_si_necesita(monkeypatch):
+    from bot.core import jobs
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-1")
+    monkeypatch.setenv("HERMES_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("HERMES_AGENT_ENV_KEEP", "DEEPSEEK_API_KEY")
+    env = jobs.entorno_agente()
+    assert env["DEEPSEEK_API_KEY"] == "sk-1", "la clave del proveedor de OpenCode pasa si se pide explícitamente"
+    assert "HERMES_BOT_TOKEN" not in env, "el token de Hermes nunca pasa"
