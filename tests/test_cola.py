@@ -458,3 +458,10 @@ def test_pedir_falla_con_mensaje():
 def test_titulo_de(pedido, titulo):
     from bot.handlers import cola as hc
     assert hc.titulo_de(pedido) == titulo
+
+
+
+def test_el_prompt_pide_cambio_primero_y_no_la_suite_completa():
+    issue = cl.Issue("demo", "johan/demo", 7, "Agregar saludo", "Que diga hola")
+    p = cl.prompt_para(issue)
+    assert "NO corras la suite completa" in p and "Empieza por el cambio" in p and "CÓMO PROBAR:" in p
