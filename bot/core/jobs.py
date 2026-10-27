@@ -13,6 +13,7 @@
 Nunca hace commit, push ni toca producción: eso es de la cola (issue #9) y siempre con aprobación de Johan.
 """
 import asyncio
+import json
 import os
 import shutil
 import sqlite3
@@ -28,15 +29,30 @@ Notify = Callable[[str], Awaitable[None]]
 CLAUDE_PROHIBIDO = ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git reset --hard:*)", "Bash(git branch -D:*)",
                     "Bash(gh pr merge:*)", "Bash(rm -rf:*)", "Bash(pm2:*)"]
 
+def _modelo_opencode() -> List[str]:
+    """HERMES_OPENCODE_MODEL (ej. deepseek/deepseek-chat): si está vacío, OpenCode usa el modelo de su propia configuración."""
+    m = os.environ.get("HERMES_OPENCODE_MODEL", "").strip()
+    return ["-m", m] if m else []
+
+
+# OpenCode sin nadie que apruebe: --auto aprueba lo que NO esté prohibido. Lo prohibido va en OPENCODE_CONFIG_CONTENT
+# (ver entorno_agente): subir, hacer merge, borrar a lo bruto o tocar PM2 es de Hermes o de Johan, nunca del agente.
+OPENCODE_PERMISOS = {
+    "edit": "allow",
+    "bash": {"*": "allow", "git push*": "deny", "git merge*": "deny", "git reset --hard*": "deny", "git branch -D*": "deny",
+             "gh pr merge*": "deny", "rm -rf*": "deny", "pm2*": "deny"},
+}
+
 AGENTES = {
-    "opencode": lambda prompt: ["opencode", "run", prompt],
+    "opencode": lambda prompt: ["opencode", "run", "--auto", *_modelo_opencode(), prompt],
     "claude": lambda prompt: ["claude", "-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Bash",
                               "--disallowedTools", *CLAUDE_PROHIBIDO],
 }
 
 # El revisor solo lee el diff que va en el prompt: sin permisos de edición ni de terminal.
 REVISORES = {
-    "opencode": lambda prompt: ["opencode", "run", prompt],
+    # El agente "plan" de OpenCode es de solo lectura: no edita archivos.
+    "opencode": lambda prompt: ["opencode", "run", "--agent", "plan", *_modelo_opencode(), prompt],
     "claude": lambda prompt: ["claude", "-p", prompt],
 }
 
@@ -130,8 +146,11 @@ def entorno_agente() -> Dict[str, str]:
     Origen (23 oct 2026): el agente y las pruebas heredaban HERMES_BOT_TOKEN del .env de Hermes; con eso, una prueba
     de otro proyecto puede mandar mensajes reales por el bot. HERMES_JOB=1 además silencia los hooks de notify.py.
     """
-    env = {k: v for k, v in os.environ.items() if not any(p in k.upper() for p in SECRETOS)}
+    conservar = {x.strip() for x in os.environ.get("HERMES_AGENT_ENV_KEEP", "").split(",") if x.strip()}
+    env = {k: v for k, v in os.environ.items() if k in conservar or not any(p in k.upper() for p in SECRETOS)}
     env["HERMES_JOB"] = "1"
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": OPENCODE_PERMISOS})
+    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     return env
 
 
