@@ -7,12 +7,14 @@ proyectos:
     repo: johanpovedadev/saas-bot
     carpeta: empanadas
     rama_base: develop
-    pruebas: cd bot-wasap && node scripts/run-tests.js
+    # --changed: si el agente solo tocó Leo, corre las pruebas de Leo (~2 min) en vez de la suite completa (~25 min)
+    pruebas: cd bot-wasap && node scripts/run-tests.js --changed
     pm2: [django-heladeria, bot-heladeria, django-pescaderia, bot-pescaderia, django-mascotas, bot-mascotas, bot-finance, bot-finance-telegram, bot-pilates, bot-pilates-clientas, admin-panel]
     puertos: [8000, 8001, 8002, 8096, 8097, 8100, 8101, 8102, 8103, 4000]
     habilitado: true
     solo_cola: true
-    preparar: cd bot-wasap && npm ci
+    # --prefer-offline: usa el caché de npm del PC en vez de bajar todo de nuevo en cada worktree
+    preparar: cd bot-wasap && npm ci --prefer-offline --no-audit --no-fund
     nota: los bots de producción corren desde esta carpeta; Hermes solo trabaja aquí con la cola, en un worktree aparte
 
   - nombre: lion-platform-api
