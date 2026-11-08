@@ -42,7 +42,7 @@ class Reloj:
 
 @pytest.fixture
 def ambiente(monkeypatch):
-    for k in ["HERMES_VIGIA_MAX_REINICIOS", "HERMES_VIGIA_VENTANA_MIN", "HERMES_SILENCIO", "HERMES_HEARTBEAT_URL"]:
+    for k in ["HERMES_VIGIA_MAX_REINICIOS", "HERMES_VIGIA_VENTANA_MIN", "HERMES_SILENCIO", "HERMES_HEARTBEAT_URL", "HERMES_VIGIA_SOLO"]:
         monkeypatch.delenv(k, raising=False)
     pm2, reloj = PM2Falso(), Reloj()
     v = vg.Vigia(run=pm2, reloj=reloj, hora=lambda: reloj.h)
@@ -175,3 +175,32 @@ def test_bot_arranca_el_vigia(monkeypatch):
     monkeypatch.setenv("HERMES_VIGIA", "0")
     asyncio.run(mod.crear_post_init({5534032418})(FakeApp()))
     assert len(creadas) == 1, "HERMES_VIGIA=0 lo apaga"
+
+
+def test_solo_vigila_las_apps_elegidas(ambiente, monkeypatch):
+    """Johan, 8 nov 2026: de los bots solo Mundo Helados y el CRM; pescadería y pilates están apagados a propósito."""
+    monkeypatch.setenv("HERMES_VIGIA_SOLO", "bot-heladeria, django-heladeria,lion-platform-api")
+    _v, pm2, reloj = ambiente
+    v = vg.Vigia(run=pm2, reloj=reloj, hora=lambda: reloj.h)
+    pm2.poner("bot-pescaderia", status="stopped")
+    pm2.poner("bot-pilates", status="stopped")
+    pm2.poner("bot-mascotas-prod", status="stopped")
+    pm2.poner("bot-heladeria", status="online")
+    assert v.revisar() == [], "lo apagado a propósito no se avisa"
+    reloj.avanzar(5)
+    pm2.poner("bot-heladeria", status="errored")
+    assert v.revisar() == ["🔴 bot-heladeria está errored en PM2. Revisa: pm2 logs bot-heladeria --lines 30"]
+
+
+def test_pm2_sin_responder_no_inventa_recuperaciones(ambiente):
+    """El 7-8 nov Hermes mandó '✅ bot-pescaderia se normalizó' cuando PM2 no respondía: no se sabía su estado."""
+    v, pm2, reloj = ambiente
+    pm2.poner("bot-pescaderia", status="stopped")
+    assert len(v.revisar()) == 1
+    reloj.avanzar(5)
+    pm2.caido = True
+    m = v.revisar()
+    assert len(m) == 1 and m[0].startswith("🔴 PM2 no responde") and not any("normalizó" in x for x in m)
+    reloj.avanzar(5)
+    pm2.caido = False
+    assert v.revisar() == ["✅ PM2 volvió a responder"], "pescadería sigue apagada: no se normalizó"

@@ -73,6 +73,7 @@ Cada 5 minutos Hermes revisa `pm2 jlist` y te escribe **una sola vez** por probl
 - 🔴 una app `stopped`/`errored`, o PM2 que no responde,
 - ✅ cuando se arregla.
 
+Con `HERMES_VIGIA_SOLO=bot-heladeria,django-heladeria,lion-platform-api,lion-platform-web` el vigía solo mira esas apps (lo apagado a propósito no se avisa).
 Con `HERMES_SILENCIO=22-7` lo crítico llega igual de noche y las recuperaciones llegan juntas en la mañana.
 
 **¿Y si se cae Hermes o el PC?** Nadie adentro puede avisar. Para eso está el latido externo:

@@ -9,6 +9,10 @@ Cada HERMES_VIGIA_CADA_MIN (5) minutos revisa `pm2 jlist`:
 - 🔴 PM2 no responde.
 Cada problema se avisa UNA vez (no un mensaje por reinicio) y se avisa también cuando se arregla (✅).
 
+Solo algunas apps (HERMES_VIGIA_SOLO, ej. "bot-heladeria,django-heladeria,lion-platform-api,lion-platform-web"):
+si está, solo esas se vigilan; las demás (apagadas a propósito, como pescadería o pilates) se ignoran. Vacía = todas.
+Si PM2 no responde, no se puede saber cómo están las apps: sus problemas se conservan y NO se avisa "✅ se normalizó".
+
 Horas de silencio (HERMES_SILENCIO, ej. "22-7"): lo crítico (caídas, bucles, PM2 sin responder) se avisa igual; lo
 demás (✅ recuperaciones) se guarda y se manda junto al terminar el silencio.
 
@@ -72,6 +76,7 @@ class Vigia:
         self.ventana_s = _env_num("HERMES_VIGIA_VENTANA_MIN", 10) * 60
         self.silencio = parse_silencio(os.environ.get("HERMES_SILENCIO", ""))
         self.heartbeat_url = os.environ.get("HERMES_HEARTBEAT_URL", "").strip()
+        self.solo = {x.strip() for x in os.environ.get("HERMES_VIGIA_SOLO", "").split(",") if x.strip()}
         self._historial: Dict[str, Deque[Tuple[float, int]]] = {}
         self._problemas: Dict[str, str] = {}  # clave -> texto del problema avisado (para avisar una vez y luego ✅)
         self._diferidos: List[str] = []
@@ -97,9 +102,15 @@ class Vigia:
         apps = self._leer_pm2()
         if apps is None:
             actuales["pm2"] = "🔴 PM2 no responde: los bots pueden estar caídos. Revisa el PC (pm2 status)."
+            # Sin PM2 no sabemos cómo están las apps: se conservan sus problemas (no es un "✅ se normalizó").
+            for clave, texto in self._problemas.items():
+                if clave != "pm2":
+                    actuales[clave] = texto
         else:
             for a in apps:
                 nombre = a.get("name", "?")
+                if self.solo and nombre not in self.solo:
+                    continue
                 env = a.get("pm2_env") or {}
                 st = env.get("status")
                 rein = int(env.get("restart_time") or 0)
